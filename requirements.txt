@@ -1,0 +1,6 @@
+sherpa-onnx>=1.13.8
+PySide6-Essentials>=6.8
+sounddevice>=0.5
+numpy>=1.26
+pynput>=1.8
+opencc>=1.1.9

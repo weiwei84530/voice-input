@@ -1,0 +1,7 @@
+.venv/
+.tools/
+models/
+__pycache__/
+config.json
+voiceinput.log
+.voiceinput.lock
