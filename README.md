@@ -35,7 +35,7 @@ Selectable in settings; a model that isn't downloaded yet is fetched automatical
 
 ## Pipeline
 
-ASR → optional LLM custom rules → formatting (`textfmt.py`) → paste.
+ASR → formatting (`textfmt.py`) → optional LLM custom rules → formatting again → paste.
 
 - **LLM custom rules** (off by default): Qwen3.5 2B (Q4_K_M GGUF) served by a local `llama-server`
   (llama.cpp, CPU build in `.tools/llama`), downloaded and loaded only while enabled. It applies only the rules

@@ -33,8 +33,10 @@ Download URL: `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-model
 
 ## Text pipeline
 
-`asr.py` (raw text, fixes X-ASR's space after full-width punctuation) → `llm.py` (only if custom rules are enabled
-and non-empty) → `textfmt.format_text` → paste. Order inside `format_text` matters: s2tw → filler removal → 百分之 →
+`asr.py` (raw text) → `textfmt.format_text` → `llm.py` (only if custom rules are enabled and non-empty) →
+`textfmt.format_text` again → paste. Formatting before the LLM makes it see Traditional Chinese / API / 728, matching how
+rules are written (tested: rule "API → 應用程式介面" failed on raw "A P I" and mangled the sentence, worked after formatting);
+formatting after it repairs anything the LLM undid. `format_text` is idempotent (verified on 141 inputs). Order inside `format_text` matters: s2tw → filler removal → 百分之 →
 numerals → spelled letters → 點 → percent → number+letter → English punctuation → CJK/ASCII spacing → trailing punctuation.
 
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).

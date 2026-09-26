@@ -125,28 +125,22 @@ class SettingsDialog(QDialog):
         self._update_rules_enabled()
 
     def set_log(self, entries):
-        self.log.clear()
-        for e in entries:
-            self.append_log(e)
-
-    def append_log(self, entry: dict):
-        """entry: time, asr, asr_s, llm, llm_s, final; llm_s is None when the LLM did not run."""
+        """Render entries newest first. Each entry: time, asr, asr_s, llm, llm_s, final (llm_s None = not run)."""
         def row(label, secs, text, color=""):
             t = f"{secs:.2f}s" if secs is not None else ""
             style = f" style='color:{color}'" if color else ""
             return (f"<tr><td width=40><b>{label}</b></td><td width=46 style='color:gray'>{t}</td>"
                     f"<td{style}>{html.escape(text)}</td></tr>")
-        self.log.append(
-            f"<div style='color:gray'>{entry['time']}</div><table cellspacing=0 cellpadding=2>"
-            + row("ASR", entry["asr_s"], entry["asr"])
-            + row("LLM", entry["llm_s"], entry["llm"], "" if entry["llm_s"] is not None else "gray")
-            + row("最終", None, entry["final"])
-            + "</table>")
-        self._scroll_log()
 
-    def _scroll_log(self):
-        bar = self.log.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        def block(e):
+            return (f"<div style='color:gray'>{e['time']}</div><table cellspacing=0 cellpadding=2>"
+                    + row("ASR", e["asr_s"], e["asr"])
+                    + row("LLM", e["llm_s"], e["llm"], "" if e["llm_s"] is not None else "gray")
+                    + row("最終", None, e["final"])
+                    + "</table>")
+
+        self.log.setHtml("<br>".join(block(e) for e in reversed(entries)))
+        self.log.verticalScrollBar().setValue(0)
 
     def _update_rules_enabled(self):
         self.rules.setEnabled(self.llm_enabled.isChecked() and self._llm_state == "ready")

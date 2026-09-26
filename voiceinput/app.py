@@ -204,6 +204,9 @@ class App(QObject):
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s", t_asr, text)
             entry = {"time": stamp, "asr": text, "asr_s": t_asr, "llm": "", "llm_s": None}
+            # Format before the LLM so it sees Traditional Chinese, joined letters and digits (matching how the
+            # user writes rules), and again after it in case the LLM undid any formatting. format_text is idempotent.
+            text = format_text(text, self.cfg.strip_trailing_punct)
             server, rules = self.llm, self.cfg.llm_user_rules.strip()
             if not self.cfg.llm_enabled:
                 entry["llm"] = "（未啟用）"
@@ -252,7 +255,7 @@ class App(QObject):
 
     def on_record(self, entry: dict):
         self._records.append(entry)
-        self.settings.append_log(entry)
+        self.settings.set_log(self._records)
 
     def _status_line(self) -> str:
         return "　".join(t for t in (self._status_text, self._llm_status_text) if t)
