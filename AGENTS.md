@@ -40,6 +40,7 @@ formatting pass after the LLM: it changed 0 of 25 real LLM outputs, and it would
 numerals → spelled letters → 點 → percent → number+letter → English punctuation → CJK/ASCII spacing → trailing punctuation.
 
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
+- After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台).
 - 嗯 / 呃 are removed by regex (tested as an LLM rule first: it worked but sometimes over-deleted; regex is free and exact).
 - Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal,
   percentage or followed by a single letter; multi-character ones become digits (十五 → 15, 七百二十八 → 728).
@@ -63,6 +64,12 @@ user rules such as term replacement would be blocked by it.
 
 - llama.cpp `llama-server` pinned to release `b11195`, auto-downloaded to `.tools/llama`; GGUF in `models/llm`.
 - Only Qwen3.5 2B. 0.8B was removed: it mangled text (cloudCode → 云代码) or did nothing, for ~0.3s saved.
+- Qwen3.5 4B was tested (2026-09-26) and not adopted. With the user's example-based rules it fixed 4/5 (dedupe 2/2,
+  城市 → 程式 2/2) but applied the example as a blind replacement (台北這個城市 → 程式, 2 of 7 normal sentences damaged)
+  and added trailing punctuation; without examples it fixed only 1/5. Neither 2B nor 4B does real context-based
+  homophone correction (地符 → diff never fixed). Cost: ~1.9s/sentence vs 0.85s, ~3GB RAM, 88s load on 8GB machine.
+- 2B cannot follow descriptive / example-style rules ("請依照語義修改…例如…"): 0/5. It only follows short imperative
+  rules, and applies them mechanically.
 - Measured on the user's i5-8500 / 8GB / no GPU: 2B ≈ 0.5–1.9s per sentence, ~1.9GB RAM, load 3–40s (cold disk).
 - The server is only running while "啟用自訂規則" is checked; the rules box is editable only once it is ready.
 - Output longer than 1.5× input (+10) is discarded as a hallucination guard.

@@ -1,4 +1,4 @@
-"""Final text formatting applied to every result (after ASR / LLM, before paste)."""
+"""Text formatting applied to every result (after ASR, before the optional LLM pass)."""
 import re
 
 import opencc
@@ -7,7 +7,8 @@ _s2tw = opencc.OpenCC("s2tw")  # glyphs only; s2twp would also swap vocabulary (
 
 
 def to_traditional(text: str) -> str:
-    return _s2tw.convert(text)
+    # s2tw turns 台 into 臺 (台北 -> 臺北); everyday Taiwanese writing uses 台
+    return _s2tw.convert(text).replace("臺", "台")
 
 CJK = r"㐀-䶿一-鿿"
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4,
@@ -130,7 +131,7 @@ def _percent(m):
 
 
 def format_text(text: str, strip_trailing_punct: bool = True) -> str:
-    text = _s2tw.convert(text)
+    text = to_traditional(text)
     text = _FILLER.sub("", text)
     text = _PERCENT.sub(_percent, text)
     text = _convert_numbers(text)
