@@ -124,7 +124,7 @@ class App(QObject):
             self.status.emit(f"模型載入失敗：{e}")
 
     def load_llm(self):
-        key = self.cfg.llm_model
+        key = self.cfg.llm_model if self.cfg.llm_model in llm.LLM_MODELS else ""
         if key == self._llm_key:
             return
         self._llm_key = key

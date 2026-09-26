@@ -20,8 +20,6 @@ _HF = "https://huggingface.co/unsloth/{repo}/resolve/main/{file}"
 
 # Order here is the order shown in the settings dropdown ("" = off is added by the UI).
 LLM_MODELS = {
-    "qwen3.5-0.8b": {"label": "Qwen3.5 0.8B（~0.5GB）", "repo": "Qwen3.5-0.8B-GGUF",
-                     "file": "Qwen3.5-0.8B-Q4_K_M.gguf"},
     "qwen3.5-2b": {"label": "Qwen3.5 2B（~1.2GB）", "repo": "Qwen3.5-2B-GGUF",
                    "file": "Qwen3.5-2B-Q4_K_M.gguf"},
 }

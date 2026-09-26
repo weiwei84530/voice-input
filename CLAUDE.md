@@ -62,6 +62,7 @@ sherpa_onnx.OfflineRecognizer.from_funasr_nano(
 - Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal or
   percentage; multi-character ones become digits (十五 → 15, 七百二十八 → 728). Also skipped: `_KEEP_WORDS`
   (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
+- A number directly followed by a single letter is joined, case kept: 二 B → 2B, 五 h → 5h.
 - `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
 - Custom vocabulary replacement (e.g. cloud code → Claude Code) is intentionally not done yet; the user plans a dedicated feature.
@@ -69,6 +70,8 @@ sherpa_onnx.OfflineRecognizer.from_funasr_nano(
 ## LLM rewrite
 
 - llama.cpp `llama-server` pinned to release `b11195`, auto-downloaded to `.tools/llama`; GGUFs in `models/llm`.
+- Qwen3.5 0.8B was removed (2026-09-26): with the first prompt it mangled text, with the refined prompt it
+  barely changed anything; only ~0.3s faster than 2B.
 - Measured on the user's i5-8500 / 8GB / no GPU: 0.8B ≈ 0.5s per sentence but mangles text (cloudCode → 云代码);
   2B ≈ 0.7–1.9s, conservative. 2B server uses ~1.9GB RAM; cold load 15–40s.
 - Output longer than 1.5× input (+10) is discarded as a hallucination guard.
