@@ -149,7 +149,7 @@ class App(QObject):
                     llm.download(key, progress)
                 self.llm_status.emit("LLM 載入中…")
                 t0 = time.monotonic()
-                server = llm.LlmServer(key)
+                server = llm.LlmServer(key, self.cfg.llm_user_rules)
                 log.info("llm %s loaded in %.1fs", key, time.monotonic() - t0)
                 if gen != self._llm_gen:
                     server.close()
@@ -192,12 +192,12 @@ class App(QObject):
             t0 = time.monotonic()
             text = rec.transcribe(audio)
             log.info("asr %.2fs: %s", time.monotonic() - t0, text)
-            server, prompt = self.llm, self.cfg.llm_prompt.strip()
-            if text and server and prompt:
+            server = self.llm
+            if text and server:
                 self.rewriting.emit()
                 t1 = time.monotonic()
                 try:
-                    text = server.rewrite(text, prompt)
+                    text = server.rewrite(text, self.cfg.llm_user_rules)
                     log.info("llm %s %.2fs: %s", server.key, time.monotonic() - t1, text)
                 except Exception:
                     log.exception("llm rewrite failed; using ASR text")

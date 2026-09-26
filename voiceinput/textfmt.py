@@ -30,6 +30,10 @@ _KEEP_RE = re.compile(f"(?<![{NUM}])(?:" + "|".join(map(re.escape, _KEEP_WORDS))
 
 _PERCENT = re.compile(f"百分之([{NUM}]+(?:點[{NUM}]+)?)")
 _SPELLED = re.compile(r"(?<![A-Za-z])[A-Za-z](?: [A-Za-z](?![A-Za-z]))+")
+_DECIMAL_AFTER = re.compile(f" ?點 ?[{NUM}\\d]")
+_DECIMAL_BEFORE = re.compile(f"[{NUM}\\d] ?點 ?$")
+_PERCENT_AFTER = re.compile(r" ?per ?cent\b", re.I)
+_PERCENT_EN = re.compile(r"(\d+(?:\.\d+)?) ?per ?cent\b", re.I)
 _DOT_DIGITS = re.compile(r"(?<=\d) ?點 ?(?=\d)")
 _DOT_LETTERS = re.compile(r"(?<=[A-Za-z]) ?點 ?(?=[A-Za-z])")
 _EN_PUNCT = re.compile(r"(?<=[A-Za-z0-9])\s*([，。？！；：])\s*(?=[A-Za-z])")
@@ -93,6 +97,12 @@ def _convert_numbers(text: str) -> str:
     text = _KEEP_RE.sub(protect, text)
 
     def repl(m):
+        # Single-character numbers stay in Chinese (一個, 兩個計劃, 第二種) unless part of a
+        # decimal (三點五) or a percentage (五 percent)
+        if len(m.group(0)) == 1 and not (_DECIMAL_AFTER.match(text, m.end())
+                                         or _DECIMAL_BEFORE.search(text, 0, m.start())
+                                         or _PERCENT_AFTER.match(text, m.end())):
+            return m.group(0)
         v = _parse_number(m.group(0))
         return m.group(0) if v is None else str(v)
 
@@ -118,6 +128,7 @@ def format_text(text: str, strip_trailing_punct: bool = True) -> str:
     text = _SPELLED.sub(lambda m: m.group(0).replace(" ", "").upper(), text)
     text = _DOT_DIGITS.sub(".", text)
     text = _DOT_LETTERS.sub(".", text)
+    text = _PERCENT_EN.sub(r"\1%", text)
     text = _EN_PUNCT.sub(lambda m: m.group(1).translate(_HALF) + " ", text)
     text = _SPACE_CJK_ASCII.sub(r"\1 \2", text)
     text = _SPACE_ASCII_CJK.sub(r"\1 \2", text)

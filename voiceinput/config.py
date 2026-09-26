@@ -2,7 +2,6 @@
 import json
 from dataclasses import asdict, dataclass
 
-from .llm import DEFAULT_PROMPT
 from .models import ROOT
 
 CONFIG_PATH = ROOT / "config.json"
@@ -15,7 +14,7 @@ class Config:
     autostart: bool = False
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
     llm_model: str = ""            # key in llm.LLM_MODELS, "" = off
-    llm_prompt: str = DEFAULT_PROMPT   # system prompt for the LLM rewrite
+    llm_user_rules: str = ""       # extra LLM rules from settings; override the internal prompt
 
     @classmethod
     def load(cls) -> "Config":

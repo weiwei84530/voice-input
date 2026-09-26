@@ -1,5 +1,12 @@
 # VoiceInput — notes for Claude
 
+## Working with the user
+
+- Whenever you can infer what the user is really after and see a better approach or a missing detail,
+  stop and ask before building. Use the AskUserQuestion tool freely, as many rounds as needed, and put
+  the recommended option first.
+- Don't guess between materially different designs; asking is cheaper than rebuilding.
+
 ## ASR model
 
 The app ships with a single model: **X-ASR** int8 zipformer transducer
@@ -52,7 +59,10 @@ sherpa_onnx.OfflineRecognizer.from_funasr_nano(
 點 → English punctuation → CJK/ASCII spacing → trailing punctuation.
 
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
-- Numeral conversion skips `_KEEP_WORDS` (一下, 統一, 星期三, 十分 …), ranges like 三四, anything with 幾, and fractions.
+- Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal or
+  percentage; multi-character ones become digits (十五 → 15, 七百二十八 → 728). Also skipped: `_KEEP_WORDS`
+  (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
+- `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
 - Custom vocabulary replacement (e.g. cloud code → Claude Code) is intentionally not done yet; the user plans a dedicated feature.
 
@@ -62,4 +72,12 @@ sherpa_onnx.OfflineRecognizer.from_funasr_nano(
 - Measured on the user's i5-8500 / 8GB / no GPU: 0.8B ≈ 0.5s per sentence but mangles text (cloudCode → 云代码);
   2B ≈ 0.7–1.9s, conservative. 2B server uses ~1.9GB RAM; cold load 15–40s.
 - Output longer than 1.5× input (+10) is discarded as a hallucination guard.
+- Prompt: `voiceinput/prompts/rewrite.txt` (developer-facing, re-read on every request). `{{user_rules}}` is replaced
+  with the rules typed in settings (`Config.llm_user_rules`), which the template says override the built-in rules.
+  The transcript is sent as a separate user message, not inlined, so the model treats it as data.
+- The prompt tells the model not to touch numerals; `textfmt` decides numeral style after the LLM.
+- The server warms up with the current user rules so the system prompt is in the KV cache (first request ~0.5s
+  instead of ~4s). Changing the rules makes the next request slow once.
+- 2B does not reliably follow user rules such as term replacement (tested: rules at the end, at the top, and inside
+  the user message all failed for cloudCode → Claude Code).
 - Known gap: if VoiceInput crashes, the llama-server child process is not killed automatically.

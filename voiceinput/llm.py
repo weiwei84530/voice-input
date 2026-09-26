@@ -9,6 +9,7 @@ import tarfile
 import time
 import urllib.request
 import zipfile
+from pathlib import Path
 
 from .models import MODELS_DIR, ROOT, fetch
 
@@ -25,11 +26,16 @@ LLM_MODELS = {
                    "file": "Qwen3.5-2B-Q4_K_M.gguf"},
 }
 
-DEFAULT_PROMPT = """你是語音輸入的文字校正器。使用者傳來的是語音辨識的原始結果，請只做以下修正：
-1. 說話時改口、重說造成的重複片段，只保留最後、最完整的說法，刪掉前面被放棄的說法。
-   例：「然後如果有各種如果有其他的方式的話」→「然後如果有其他的方式的話」
-2. 其他文字一字不改：不要改寫、不要潤飾、不要摘要、不要回答內容、不要翻譯。
-3. 只輸出校正後的文字，不要加任何說明或引號。"""
+# Internal system prompt (developer-facing). {{user_rules}} is replaced with the rules
+# the user typed in settings; the transcript itself is sent as a separate user message.
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "rewrite.txt"
+USER_RULES_SLOT = "{{user_rules}}"
+
+
+def build_system_prompt(user_rules: str) -> str:
+    # Read on every call so the file can be tweaked without restarting the app
+    template = PROMPT_PATH.read_text(encoding="utf-8")
+    return template.replace(USER_RULES_SLOT, user_rules.strip() or "（無）")
 
 _THREADS = max(1, (os.cpu_count() or 2) - 1)
 
@@ -81,7 +87,7 @@ def _free_port() -> int:
 
 
 class LlmServer:
-    def __init__(self, key: str):
+    def __init__(self, key: str, user_rules: str = ""):
         self.key = key
         self.label = LLM_MODELS[key]["label"].split("（")[0]
         self.port = _free_port()
@@ -93,6 +99,8 @@ class LlmServer:
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         self._wait_ready()
+        # Warm up so the system prompt is already in the KV cache for the first real request
+        self.rewrite("你好", user_rules)
 
     def _wait_ready(self, timeout: float = 120):
         deadline = time.monotonic() + timeout
@@ -109,9 +117,10 @@ class LlmServer:
         self.close()
         raise TimeoutError("llama-server did not become ready")
 
-    def rewrite(self, text: str, prompt: str) -> str:
+    def rewrite(self, text: str, user_rules: str = "") -> str:
         body = {
-            "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text}],
+            "messages": [{"role": "system", "content": build_system_prompt(user_rules)},
+                         {"role": "user", "content": text}],
             "temperature": 0,
             "max_tokens": len(text) * 2 + 32,
             "chat_template_kwargs": {"enable_thinking": False},

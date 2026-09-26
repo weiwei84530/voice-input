@@ -1,7 +1,7 @@
 """Simple settings window. Every change is applied and saved immediately."""
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-                               QLabel, QPlainTextEdit, QPushButton, QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
+                               QPlainTextEdit, QVBoxLayout)
 
 from . import audio, llm
 from .hotkey import HOTKEYS
@@ -35,10 +35,10 @@ class SettingsDialog(QDialog):
             self.llm.addItem(m["label"], key)
 
         self.prompt = QPlainTextEdit()
-        self.prompt.setMinimumHeight(140)
-        reset = QPushButton("還原預設提示詞")
-        reset.clicked.connect(lambda: self.prompt.setPlainText(llm.DEFAULT_PROMPT))
-        # Save the prompt shortly after typing stops
+        self.prompt.setMinimumHeight(110)
+        self.prompt.setPlaceholderText("例如：\n- 你覺得明天會下雨嗎 → 句尾問句要加問號\n- 保留「那個」不要刪\n"
+                                       "這裡的規則優先於內建規則。")
+        # Save the rules shortly after typing stops
         self._prompt_timer = QTimer(self, singleShot=True, interval=600, timeout=self._save_prompt)
         self.prompt.textChanged.connect(lambda: None if self._loading else self._prompt_timer.start())
 
@@ -52,11 +52,7 @@ class SettingsDialog(QDialog):
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
         form.addRow("LLM 校正", self.llm)
-        form.addRow("LLM 提示詞", self.prompt)
-        reset_row = QHBoxLayout()
-        reset_row.addStretch()
-        reset_row.addWidget(reset)
-        form.addRow("", reset_row)
+        form.addRow("LLM 自訂規則", self.prompt)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.close)
@@ -81,7 +77,7 @@ class SettingsDialog(QDialog):
         self._select(self.llm, self.cfg.llm_model)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
         self.autostart.setChecked(self.cfg.autostart)
-        self.prompt.setPlainText(self.cfg.llm_prompt)
+        self.prompt.setPlainText(self.cfg.llm_user_rules)
         self._loading = False
 
     def set_status(self, text: str):
@@ -104,7 +100,7 @@ class SettingsDialog(QDialog):
         self.applied.emit()
 
     def _save_prompt(self):
-        self.cfg.llm_prompt = self.prompt.toPlainText()
+        self.cfg.llm_user_rules = self.prompt.toPlainText()
         self.cfg.save()
 
     def hideEvent(self, e):

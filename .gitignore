@@ -5,3 +5,4 @@ __pycache__/
 config.json
 voiceinput.log
 .voiceinput.lock
+llama-server.log

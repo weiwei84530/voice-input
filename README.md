@@ -31,10 +31,11 @@ Previously evaluated alternatives are recorded in `CLAUDE.md`.
 ASR → optional LLM rewrite → formatting (`textfmt.py`) → paste.
 
 - **LLM rewrite** (off by default): Qwen3.5 0.8B / 2B (Q4_K_M GGUF) served by a local `llama-server`
-  (llama.cpp, CPU build in `.tools/llama`). Downloaded on first selection. The prompt is editable in settings;
-  the default one removes restarted / repeated phrases. Timings are written to `voiceinput.log`.
-- **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), Chinese numerals → digits,
-  百分之X → X%, spelled letters joined (A P I → API), 點 between digits/letters → `.`,
+  (llama.cpp, CPU build in `.tools/llama`). Downloaded on first selection. Built-in prompt:
+  `voiceinput/prompts/rewrite.txt`; extra rules typed in settings are inserted at `{{user_rules}}` and take priority.
+  Timings are written to `voiceinput.log`.
+- **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), multi-character Chinese numerals → digits
+  (single-character ones like 一個 / 兩個 stay), 百分之X / X percent → X%, spelled letters joined (A P I → API), 點 between digits/letters → `.`,
   half-width punctuation inside English, a space between CJK and English/digits, optional trailing punctuation removal.
 
 ## Layout
