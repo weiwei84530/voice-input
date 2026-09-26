@@ -15,6 +15,7 @@ else:
     DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "VoiceInput"
 
 CONFIG_PATH = DATA_DIR / "config.json"
+HOTWORDS_PATH = DATA_DIR / "hotwords.json"
 LOG_PATH = DATA_DIR / "voiceinput.log"
 LLAMA_LOG_PATH = DATA_DIR / "llama-server.log"
 LOCK_PATH = DATA_DIR / ".voiceinput.lock"

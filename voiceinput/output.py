@@ -23,3 +23,9 @@ def paste_text(text: str) -> None:
         _kb.release("v")
     # Restore after the target app has had time to read the clipboard
     QTimer.singleShot(400, lambda: cb.setText(previous))
+
+
+def press_delete() -> None:
+    """Delete the target app's current selection."""
+    _kb.press(keyboard.Key.delete)
+    _kb.release(keyboard.Key.delete)

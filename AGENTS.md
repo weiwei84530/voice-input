@@ -58,7 +58,25 @@ numerals → spelled letters → 點 → percent → number+letter → English p
 - A number directly followed by a single letter is joined, case kept: 二 B → 2B, 五 h → 5h.
 - `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
-- Custom vocabulary replacement (e.g. cloud code → Claude Code) is intentionally not done yet; the user plans a dedicated feature.
+- User hotwords (`hotwords.py`) are applied right after `format_text`, before the LLM; see below.
+
+## Voice edits on selected text and hotwords
+
+Plan agreed 2026-09-27. If text is selected when the hotkey goes down (`selection.py`, UI Automation TextPattern,
+read on a background thread), the utterance edits the selection instead of being pasted as new text (`edit.py`):
+刪除 → Delete key; letters spelled one by one → that word, with the selection's capitalisation (Cloud + C L A U D E →
+Claude); anything else → replaces the selection. Terminals are excluded: pasting there inserts at the prompt cursor.
+UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
+
+A replacement is learned as a hotword (`hotwords.json` in DATA_DIR, key = wrong text, value = correction) only if the
+selected text came from a recent VoiceInput result and the edit looks like a correction: spelled, Chinese words of
+2+ characters with near-identical pinyin (fuzzy zh/z, ing/in, l/n …), or similar Latin spelling. A tray
+notification offers undo. Hotword modes: "always" replaces blindly; "context" (default) needs a judge to confirm the
+word fits the sentence (4B test showed blind 城市 → 程式 breaks 台北這個城市).
+
+Not built yet (waiting for LLM experiments): candidate generation (pypinyin + word list) ranked by the local LLM,
+the 選字 popup (non-activating window next to the selection), auto-pick when ASR repeats the selected text, the
+context judge, free-form edit instructions via 2B, LLM loading when voice edits are on, X-ASR native hotword biasing.
 
 ## LLM custom rules
 

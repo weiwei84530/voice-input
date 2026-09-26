@@ -11,13 +11,15 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, llm, models, paths
+from . import autostart, edit, llm, models, paths
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
 from .hotkey import TAP_THRESHOLD, PushToTalk
-from .output import paste_text
+from .hotwords import HotwordStore, worth_learning
+from .output import paste_text, press_delete
 from .overlay import Overlay
+from .selection import SelectionProbe
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
 
@@ -46,6 +48,7 @@ class App(QObject):
     pressed = Signal()
     released = Signal(float)
     transcribed = Signal(str)
+    edited = Signal(object, object)   # Selection, edit.Edit: a voice edit on selected text
     rewriting = Signal()
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
@@ -69,12 +72,16 @@ class App(QObject):
         self._llm_wanted = None
         self._llm_gen = 0                       # bumps on every enable/disable; stale loads discard themselves
         self._llm_lock = threading.Lock()       # serializes LLM downloads / server starts
+        self.hotwords = HotwordStore()
+        self._recent = deque(maxlen=30)         # recent pasted results; only these are learned from
+        self._probe: SelectionProbe | None = None
+        self._undo = None                       # hotword the last "learned" notification can undo
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self.overlay = Overlay(lambda: self.recorder.level)
-        self.settings = SettingsDialog(self.cfg)
+        self.settings = SettingsDialog(self.cfg, self.hotwords)
         self.settings.applied.connect(self.apply_settings)
         self.settings.models_dir_chosen.connect(self.change_models_dir)
 
@@ -86,11 +93,13 @@ class App(QObject):
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(
             lambda reason: self.open_settings() if reason == QSystemTrayIcon.Trigger else None)
+        self.tray.messageClicked.connect(self._undo_learned)
         self.tray.show()
 
         self.pressed.connect(self.on_press)
         self.released.connect(self.on_release)
         self.transcribed.connect(self.on_transcribed)
+        self.edited.connect(self.on_edited)
         self.rewriting.connect(self.overlay.show_rewriting)
         self.status.connect(self.on_status)
         self.llm_status.connect(self.on_llm_status)
@@ -217,6 +226,7 @@ class App(QObject):
             self.tray.showMessage("VoiceInput", f"無法開啟麥克風：{e}", self.icon_idle, 3000)
             return
         self.recording = True
+        self._probe = SelectionProbe() if self.cfg.edit_enabled else None
         self.tray.setIcon(self.icon_rec)
         self.overlay.show_recording()
 
@@ -230,9 +240,9 @@ class App(QObject):
             self.overlay.hide_overlay()
             return
         self.overlay.show_thinking()
-        self.worker.submit(self._transcribe_job, self.recognizer, audio)
+        self.worker.submit(self._transcribe_job, self.recognizer, audio, self._probe)
 
-    def _transcribe_job(self, rec, audio):
+    def _transcribe_job(self, rec, audio, probe):
         stamp = time.strftime("%H:%M:%S")
         try:
             t0 = time.monotonic()
@@ -242,8 +252,18 @@ class App(QObject):
             entry = {"time": stamp, "asr": to_traditional(text), "asr_s": t_asr, "llm": "", "llm_s": None}
             # Format before the LLM so it sees Traditional Chinese, joined letters and digits, matching how the
             # user writes rules. No formatting after it: that would override rules such as "add a trailing period".
-            text = format_text(text, self.cfg.strip_trailing_punct)
+            raw = text
+            text = self.hotwords.apply(format_text(text, self.cfg.strip_trailing_punct))
             entry["fmt"] = text
+            sel = probe.result() if probe else None
+            if sel is not None:
+                ed = edit.plan(sel.text, raw, text)
+                entry["llm"] = None
+                entry["edit"] = _describe(sel.text, ed)
+                log.info("edit on %s: %s", sel.app, entry["edit"])
+                self.record.emit(entry)
+                self.edited.emit(sel, ed)
+                return
             server, rules = self.llm, self.cfg.llm_user_rules.strip()
             if not self.cfg.llm_enabled:
                 entry["llm"] = None  # hidden in the log
@@ -273,7 +293,44 @@ class App(QObject):
     def on_transcribed(self, text: str):
         self.overlay.hide_overlay()
         log.info("result: %s", text)
+        if text:
+            self._recent.append(text)
         paste_text(text)
+
+    def on_edited(self, sel, ed):
+        self.overlay.hide_overlay()
+        self._undo = None   # a click on any newer notification must not undo an older hotword
+        if ed.action == edit.DELETE:
+            press_delete()
+        elif ed.action == edit.REPLACE:
+            paste_text(ed.text)
+            self._learn(sel.text, ed)
+        elif ed.action == edit.CANDIDATES:
+            self.tray.showMessage("VoiceInput", "選字選單尚未完成", self.icon_idle, 2000)
+        else:
+            self.tray.showMessage("VoiceInput", f"辨識結果和選取的文字相同：{ed.text or '（沒有文字）'}",
+                                  self.icon_idle, 2000)
+
+    def _learn(self, old: str, ed):
+        """Record old -> new as a hotword if old came from a recent result and the edit looks like a correction."""
+        i = next((i for i in range(len(self._recent) - 1, -1, -1) if old in self._recent[i]), None)
+        if i is None:
+            return
+        self._recent[i] = self._recent[i].replace(old, ed.text, 1)
+        if not worth_learning(old, ed.text, ed.spelled):
+            return
+        h = self.hotwords.add(old.strip(), ed.text.strip())
+        log.info("learned hotword: %s -> %s", h.key, h.value)
+        self._undo = h
+        self.settings.refresh_hotwords()
+        self.tray.showMessage("已記住熱詞", f"{h.key} → {h.value}（點這裡取消）", self.icon_idle, 4000)
+
+    def _undo_learned(self):
+        if self._undo is not None:
+            log.info("hotword undone: %s -> %s", self._undo.key, self._undo.value)
+            self.hotwords.remove(self._undo)
+            self._undo = None
+            self.settings.refresh_hotwords()
 
     # --- settings / status ---
     def on_status(self, text: str):
@@ -328,6 +385,16 @@ class App(QObject):
         if self.llm:
             self.llm.close()
         self.qapp.quit()
+
+
+def _describe(selected: str, ed) -> str:
+    if ed.action == edit.DELETE:
+        return f"刪除「{selected}」"
+    if ed.action == edit.REPLACE:
+        return f"{selected} → {ed.text}" + ("（拼字）" if ed.spelled else "")
+    if ed.action == edit.CANDIDATES:
+        return f"選字「{selected}」"
+    return f"「{selected}」不變"
 
 
 def main():

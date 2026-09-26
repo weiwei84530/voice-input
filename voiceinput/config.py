@@ -16,6 +16,7 @@ class Config:
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
     llm_enabled: bool = False      # run the local LLM with llm_user_rules (model only loaded when on)
     llm_user_rules: str = ""       # custom rules the LLM applies; empty = LLM is skipped
+    edit_enabled: bool = True      # speaking with text selected edits the selection (刪除, spelling, replace)
     models_dir: str = ""           # where ASR / LLM models are stored, "" = paths.DEFAULT_MODELS_DIR
 
     @classmethod
