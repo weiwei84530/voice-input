@@ -2,18 +2,18 @@
 import json
 from dataclasses import asdict, dataclass
 
-from .models import DEFAULT_MODEL, ROOT
+from .models import ROOT
 
 CONFIG_PATH = ROOT / "config.json"
 
 
 @dataclass
 class Config:
-    model: str = DEFAULT_MODEL    # key in models.MODELS
     mic: str = ""                  # input device name, "" = system default
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
-    traditional: bool = True       # convert output to Traditional Chinese (Taiwan)
+    traditional: bool = True       # convert output to Traditional Chinese (Taiwan glyphs)
+    strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
 
     @classmethod
     def load(cls) -> "Config":

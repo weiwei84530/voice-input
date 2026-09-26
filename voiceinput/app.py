@@ -78,7 +78,7 @@ class App(QObject):
 
         self.ptt = PushToTalk(self.cfg.hotkey, self.pressed.emit, self.released.emit)
         self.ptt.start()
-        self.load_model(self.cfg.model)
+        self.load_model()
 
     @staticmethod
     def _dark_taskbar() -> bool:
@@ -93,22 +93,20 @@ class App(QObject):
             return True
 
     # --- model ---
-    def load_model(self, key: str):
+    def load_model(self):
         self.recognizer = None
-        self.worker.submit(self._load_model_job, key)
+        self.worker.submit(self._load_model_job)
 
-    def _load_model_job(self, key: str):
+    def _load_model_job(self):
         try:
-            if not models.is_installed(key):
+            if not models.is_installed():
                 def progress(done, total):
                     pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
                     self.status.emit(f"下載模型中… {pct}")
-                models.download(key, progress)
+                models.download(progress)
             self.status.emit("載入模型中…")
-            rec = Recognizer(key)
-            if key == self.cfg.model:
-                self.recognizer = rec
-                self.status.emit(f"就緒：{models.MODELS[key]['label']}")
+            self.recognizer = Recognizer()
+            self.status.emit(f"就緒：{models.MODEL_LABEL}")
         except Exception as e:
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
@@ -138,12 +136,12 @@ class App(QObject):
             self.overlay.hide_overlay()
             return
         self.overlay.show_thinking()
-        rec, traditional = self.recognizer, self.cfg.traditional
-        self.worker.submit(self._transcribe_job, rec, audio, traditional)
+        self.worker.submit(self._transcribe_job, self.recognizer, audio,
+                           self.cfg.traditional, self.cfg.strip_trailing_punct)
 
-    def _transcribe_job(self, rec, audio, traditional):
+    def _transcribe_job(self, rec, audio, traditional, strip_trailing_punct):
         try:
-            text = rec.transcribe(audio, traditional)
+            text = rec.transcribe(audio, traditional, strip_trailing_punct)
         except Exception:
             log.exception("transcribe failed")
             text = ""
@@ -175,10 +173,8 @@ class App(QObject):
         except Exception as e:
             log.exception("autostart failed")
             self.settings.set_status(f"開機啟動設定失敗：{e}")
-        if self.recognizer is None or self.recognizer.key != self.cfg.model:
-            self.load_model(self.cfg.model)
-        else:
-            self.settings.set_status("已儲存")
+            return
+        self.settings.set_status("已儲存")
 
     def quit(self):
         self.ptt.stop()

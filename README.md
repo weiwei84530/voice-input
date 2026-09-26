@@ -18,17 +18,13 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
-- Left-click the tray icon to open settings (model, microphone, hotkey, Traditional Chinese output, launch at login).
-- Selecting a model that isn't downloaded yet downloads it automatically (progress shown in settings / tray tooltip).
+- Left-click the tray icon to open settings (microphone, hotkey, Traditional Chinese output, trailing punctuation removal, launch at login).
+- If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
 
-## Models
+## Model
 
-| Model | Size | 18s audio (CPU) | Notes |
-|---|---|---|---|
-| X-ASR (default) | 130MB | ~0.75s | Punctuation, good English |
-| SenseVoice Small | 155MB | ~0.8s | Punctuation, numbers as digits, weaker English |
-| Qwen3-ASR 0.6B | 840MB | ~4.4s | Most accurate |
-| Fun-ASR-Nano (fp16) | 1GB | ~7.5s | The int8 build returns empty output on some CPUs |
+X-ASR int8 zipformer transducer (zh/en, punctuation, ~130MB, ~0.75s for 18s of audio on CPU).
+Previously evaluated alternatives are recorded in `CLAUDE.md`.
 
 ## Layout
 
@@ -37,10 +33,10 @@ voiceinput/
   app.py       tray, wiring, push-to-talk flow
   hotkey.py    global hotkey (pynput; Windows low-level hook suppresses CapsLock)
   audio.py     microphone capture
-  asr.py       sherpa-onnx recognizers, text cleanup, s2twp conversion
+  asr.py       sherpa-onnx recognizer, text cleanup, s2tw conversion
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog
   output.py    clipboard paste
-  models.py    model registry + downloader
+  models.py    model location + downloader
   autostart.py launch at login
 ```
