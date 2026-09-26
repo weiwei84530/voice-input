@@ -18,32 +18,12 @@ Benchmarks: 18s zh/en test audio, CPU, `num_threads = min(4, cpu_count // 2)`.
 
 | Model | Archive dir (sherpa-onnx `asr-models` release) | Size | 18s audio | Notes |
 |---|---|---|---|---|
-| X-ASR (current) | `sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03` | 130MB | ~0.75s | Punctuation, good English |
+| X-ASR (default) | `sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03` | 130MB | ~0.75s | Punctuation, good English |
 | SenseVoice Small | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17` | 155MB | ~0.8s | Punctuation, numbers as digits (ITN), weaker English; emits tags like `<\|zh\|><\|NEUTRAL\|>` that must be stripped |
 | Qwen3-ASR 0.6B | `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25` | 840MB | ~4.4s | Most accurate |
 | Fun-ASR-Nano | `sherpa-onnx-funasr-nano-fp16-2025-12-30` | 1GB | ~7.5s | The int8 build returns empty output on some CPUs; use fp16 `llm` |
 
 Download URL: `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/<dir>.tar.bz2`
-
-Loader code for the removed models (`d` = model dir):
-
-```python
-# SenseVoice Small — files: model.int8.onnx, tokens.txt
-sherpa_onnx.OfflineRecognizer.from_sense_voice(
-    model=str(d / "model.int8.onnx"), tokens=str(d / "tokens.txt"),
-    num_threads=_THREADS, language="auto", use_itn=True)
-
-# Qwen3-ASR 0.6B — files: conv_frontend.onnx, encoder.int8.onnx, decoder.int8.onnx, tokenizer/
-sherpa_onnx.OfflineRecognizer.from_qwen3_asr(
-    conv_frontend=str(d / "conv_frontend.onnx"), encoder=str(d / "encoder.int8.onnx"),
-    decoder=str(d / "decoder.int8.onnx"), tokenizer=str(d / "tokenizer"), num_threads=_THREADS)
-
-# Fun-ASR-Nano — files: encoder_adaptor.int8.onnx, llm.fp16.onnx, embedding.int8.onnx, Qwen3-0.6B/
-sherpa_onnx.OfflineRecognizer.from_funasr_nano(
-    encoder_adaptor=str(d / "encoder_adaptor.int8.onnx"), llm=str(d / "llm.fp16.onnx"),
-    embedding=str(d / "embedding.int8.onnx"), tokenizer=str(d / "Qwen3-0.6B"),
-    num_threads=_THREADS, itn=True)
-```
 
 ### Other candidates seen (not evaluated)
 
