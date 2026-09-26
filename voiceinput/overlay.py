@@ -1,10 +1,10 @@
-"""Minimal always-on-top pill shown while recording / transcribing (Typeless-style)."""
+"""Minimal always-on-top pill shown while recording / transcribing / rewriting (Typeless-style)."""
 import math
 import sys
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 W, H = 132, 40
@@ -12,7 +12,7 @@ BARS = 9
 
 
 class Overlay(QWidget):
-    IDLE, RECORDING, THINKING = range(3)
+    IDLE, RECORDING, THINKING, REWRITING = range(4)
 
     def __init__(self, level_source):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -34,6 +34,9 @@ class Overlay(QWidget):
 
     def show_thinking(self):
         self._set_state(self.THINKING)
+
+    def show_rewriting(self):
+        self._set_state(self.REWRITING)
 
     def hide_overlay(self):
         if self._state == self.IDLE:
@@ -117,4 +120,17 @@ class Overlay(QWidget):
                 r = 3 + 1.5 * a
                 cx = W / 2 + (i - 1) * 16
                 p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+        elif self._state == self.REWRITING:
+            # a dot orbiting a faint ring, with a fading tail
+            cx, ring = W / 2, 9
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(255, 255, 255, 40), 1.5))
+            p.drawEllipse(QRectF(cx - ring, cy - ring, 2 * ring, 2 * ring))
+            p.setPen(Qt.NoPen)
+            for k in range(6):
+                a = t * 7 - k * 0.32
+                r = 3.2 - k * 0.4
+                p.setBrush(QColor(255, 255, 255, int(255 * (1 - k / 6))))
+                x, y = cx + ring * math.cos(a), cy + ring * math.sin(a)
+                p.drawEllipse(QRectF(x - r, y - r, 2 * r, 2 * r))
         p.end()

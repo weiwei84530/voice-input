@@ -2,13 +2,14 @@
 import logging
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, models
+from . import autostart, llm, models
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -16,6 +17,7 @@ from .hotkey import TAP_THRESHOLD, PushToTalk
 from .output import paste_text
 from .overlay import Overlay
 from .settings import SettingsDialog
+from .textfmt import format_text
 
 log = logging.getLogger("voiceinput")
 
@@ -42,7 +44,9 @@ class App(QObject):
     pressed = Signal()
     released = Signal(float)
     transcribed = Signal(str)
+    rewriting = Signal()
     status = Signal(str)
+    llm_status = Signal(str)
 
     def __init__(self, qapp: QApplication):
         super().__init__()
@@ -53,6 +57,11 @@ class App(QObject):
         self.recording = False
         self.worker = ThreadPoolExecutor(max_workers=1)   # serializes model loads and transcription
         self._status_text = ""
+        self._llm_status_text = ""
+        self.llm: llm.LlmServer | None = None
+        self._llm_key = None
+        self._llm_gen = 0                       # bumps on every model switch; stale loads discard themselves
+        self._llm_lock = threading.Lock()       # serializes LLM downloads / server starts
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
@@ -74,11 +83,14 @@ class App(QObject):
         self.pressed.connect(self.on_press)
         self.released.connect(self.on_release)
         self.transcribed.connect(self.on_transcribed)
+        self.rewriting.connect(self.overlay.show_rewriting)
         self.status.connect(self.on_status)
+        self.llm_status.connect(self.on_llm_status)
 
         self.ptt = PushToTalk(self.cfg.hotkey, self.pressed.emit, self.released.emit)
         self.ptt.start()
         self.load_model()
+        self.load_llm()
 
     @staticmethod
     def _dark_taskbar() -> bool:
@@ -111,6 +123,43 @@ class App(QObject):
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
 
+    def load_llm(self):
+        key = self.cfg.llm_model
+        if key == self._llm_key:
+            return
+        self._llm_key = key
+        self._llm_gen += 1
+        old, self.llm = self.llm, None
+        threading.Thread(target=self._load_llm_job, args=(self._llm_gen, key, old), daemon=True).start()
+
+    def _load_llm_job(self, gen, key, old):
+        with self._llm_lock:
+            if old:
+                old.close()
+            if gen != self._llm_gen:
+                return
+            if not key:
+                self.llm_status.emit("")
+                return
+            try:
+                if not llm.is_installed(key):
+                    def progress(done, total):
+                        pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
+                        self.llm_status.emit(f"LLM 下載中… {pct}")
+                    llm.download(key, progress)
+                self.llm_status.emit("LLM 載入中…")
+                t0 = time.monotonic()
+                server = llm.LlmServer(key)
+                log.info("llm %s loaded in %.1fs", key, time.monotonic() - t0)
+                if gen != self._llm_gen:
+                    server.close()
+                    return
+                self.llm = server
+                self.llm_status.emit(f"LLM：{server.label}")
+            except Exception as e:
+                log.exception("llm load failed")
+                self.llm_status.emit(f"LLM 載入失敗：{e}")
+
     # --- push-to-talk ---
     def on_press(self):
         if self.recognizer is None:
@@ -136,12 +185,23 @@ class App(QObject):
             self.overlay.hide_overlay()
             return
         self.overlay.show_thinking()
-        self.worker.submit(self._transcribe_job, self.recognizer, audio,
-                           self.cfg.traditional, self.cfg.strip_trailing_punct)
+        self.worker.submit(self._transcribe_job, self.recognizer, audio)
 
-    def _transcribe_job(self, rec, audio, traditional, strip_trailing_punct):
+    def _transcribe_job(self, rec, audio):
         try:
-            text = rec.transcribe(audio, traditional, strip_trailing_punct)
+            t0 = time.monotonic()
+            text = rec.transcribe(audio)
+            log.info("asr %.2fs: %s", time.monotonic() - t0, text)
+            server, prompt = self.llm, self.cfg.llm_prompt.strip()
+            if text and server and prompt:
+                self.rewriting.emit()
+                t1 = time.monotonic()
+                try:
+                    text = server.rewrite(text, prompt)
+                    log.info("llm %s %.2fs: %s", server.key, time.monotonic() - t1, text)
+                except Exception:
+                    log.exception("llm rewrite failed; using ASR text")
+            text = format_text(text, self.cfg.strip_trailing_punct)
         except Exception:
             log.exception("transcribe failed")
             text = ""
@@ -156,12 +216,23 @@ class App(QObject):
     def on_status(self, text: str):
         self._status_text = text
         log.info("status: %s", text)
-        self.tray.setToolTip(f"VoiceInput — {text}")
-        self.settings.set_status(text)
+        self._show_status()
+
+    def on_llm_status(self, text: str):
+        self._llm_status_text = text
+        log.info("llm status: %s", text)
+        self._show_status()
+
+    def _status_line(self) -> str:
+        return "　".join(t for t in (self._status_text, self._llm_status_text) if t)
+
+    def _show_status(self):
+        self.tray.setToolTip(f"VoiceInput — {self._status_line()}")
+        self.settings.set_status(self._status_line())
 
     def open_settings(self):
         self.settings.load_values()
-        self.settings.set_status(self._status_text)
+        self.settings.set_status(self._status_line())
         self.settings.show()
         self.settings.raise_()
         self.settings.activateWindow()
@@ -173,12 +244,13 @@ class App(QObject):
         except Exception as e:
             log.exception("autostart failed")
             self.settings.set_status(f"開機啟動設定失敗：{e}")
-            return
-        self.settings.set_status("已儲存")
+        self.load_llm()
 
     def quit(self):
         self.ptt.stop()
         self.tray.hide()
+        if self.llm:
+            self.llm.close()
         self.qapp.quit()
 
 

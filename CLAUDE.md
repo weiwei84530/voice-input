@@ -45,9 +45,21 @@ sherpa_onnx.OfflineRecognizer.from_funasr_nano(
 - X-ASR streaming variants (`...-160ms/480ms/960ms/1920ms-streaming-...-2026-06-05`) — would allow live partial results.
 - Nemotron 3.5 ASR streaming 0.6B (multilingual, ~450MB int8) — reported weak on Chinese.
 
-## Text post-processing (`voiceinput/asr.py`)
+## Text pipeline
 
-- Remove spaces after full-width punctuation (X-ASR emits them).
-- Optional: strip trailing `。，,.` (`Config.strip_trailing_punct`).
-- Optional: OpenCC `s2tw` (glyph-only, keeps wording). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式, 软件 → 軟體).
-- Spaces between Chinese and English come from the model itself; nothing adds or removes them.
+`asr.py` (raw text, fixes X-ASR's space after full-width punctuation) → `llm.py` (optional rewrite) →
+`textfmt.format_text` → paste. Order inside `format_text` matters: s2tw → 百分之 → numerals → spelled letters →
+點 → English punctuation → CJK/ASCII spacing → trailing punctuation.
+
+- OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
+- Numeral conversion skips `_KEEP_WORDS` (一下, 統一, 星期三, 十分 …), ranges like 三四, anything with 幾, and fractions.
+- 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
+- Custom vocabulary replacement (e.g. cloud code → Claude Code) is intentionally not done yet; the user plans a dedicated feature.
+
+## LLM rewrite
+
+- llama.cpp `llama-server` pinned to release `b11195`, auto-downloaded to `.tools/llama`; GGUFs in `models/llm`.
+- Measured on the user's i5-8500 / 8GB / no GPU: 0.8B ≈ 0.5s per sentence but mangles text (cloudCode → 云代码);
+  2B ≈ 0.7–1.9s, conservative. 2B server uses ~1.9GB RAM; cold load 15–40s.
+- Output longer than 1.5× input (+10) is discarded as a hallucination guard.
+- Known gap: if VoiceInput crashes, the llama-server child process is not killed automatically.

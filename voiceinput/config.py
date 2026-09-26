@@ -2,6 +2,7 @@
 import json
 from dataclasses import asdict, dataclass
 
+from .llm import DEFAULT_PROMPT
 from .models import ROOT
 
 CONFIG_PATH = ROOT / "config.json"
@@ -12,8 +13,9 @@ class Config:
     mic: str = ""                  # input device name, "" = system default
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
-    traditional: bool = True       # convert output to Traditional Chinese (Taiwan glyphs)
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
+    llm_model: str = ""            # key in llm.LLM_MODELS, "" = off
+    llm_prompt: str = DEFAULT_PROMPT   # system prompt for the LLM rewrite
 
     @classmethod
     def load(cls) -> "Config":

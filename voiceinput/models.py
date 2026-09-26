@@ -20,15 +20,11 @@ def is_installed() -> bool:
     return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
 
 
-def download(progress=None) -> None:
-    """Download and extract the model. progress(done_bytes, total_bytes) is optional."""
-    if is_installed():
-        return
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    name = MODEL_DIR.name + ".tar.bz2"
-    archive = MODELS_DIR / name
-    tmp = archive.with_suffix(".part")
-    with urllib.request.urlopen(BASE_URL + name) as resp, open(tmp, "wb") as f:
+def fetch(url: str, dest: Path, progress=None) -> None:
+    """Download url to dest via a .part file. progress(done_bytes, total_bytes) is optional."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    with urllib.request.urlopen(url) as resp, open(tmp, "wb") as f:
         total = int(resp.headers.get("Content-Length", 0))
         done = 0
         while chunk := resp.read(1 << 20):
@@ -36,7 +32,16 @@ def download(progress=None) -> None:
             done += len(chunk)
             if progress:
                 progress(done, total)
-    tmp.replace(archive)
+    tmp.replace(dest)
+
+
+def download(progress=None) -> None:
+    """Download and extract the model. progress(done_bytes, total_bytes) is optional."""
+    if is_installed():
+        return
+    name = MODEL_DIR.name + ".tar.bz2"
+    archive = MODELS_DIR / name
+    fetch(BASE_URL + name, archive, progress)
     with tarfile.open(archive, "r:bz2") as tar:
         tar.extractall(MODELS_DIR, filter="data")
     archive.unlink()
