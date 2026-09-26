@@ -54,33 +54,37 @@ sherpa_onnx.OfflineRecognizer.from_funasr_nano(
 
 ## Text pipeline
 
-`asr.py` (raw text, fixes X-ASR's space after full-width punctuation) → `llm.py` (optional rewrite) →
-`textfmt.format_text` → paste. Order inside `format_text` matters: s2tw → 百分之 → numerals → spelled letters →
-點 → English punctuation → CJK/ASCII spacing → trailing punctuation.
+`asr.py` (raw text, fixes X-ASR's space after full-width punctuation) → `llm.py` (only if custom rules are enabled
+and non-empty) → `textfmt.format_text` → paste. Order inside `format_text` matters: s2tw → filler removal → 百分之 →
+numerals → spelled letters → 點 → percent → number+letter → English punctuation → CJK/ASCII spacing → trailing punctuation.
 
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
-- Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal or
-  percentage; multi-character ones become digits (十五 → 15, 七百二十八 → 728). Also skipped: `_KEEP_WORDS`
-  (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
+- 嗯 / 呃 are removed by regex (tested as an LLM rule first: it worked but sometimes over-deleted; regex is free and exact).
+- Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal,
+  percentage or followed by a single letter; multi-character ones become digits (十五 → 15, 七百二十八 → 728).
+  Also skipped: `_KEEP_WORDS` (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
 - A number directly followed by a single letter is joined, case kept: 二 B → 2B, 五 h → 5h.
 - `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
 - Custom vocabulary replacement (e.g. cloud code → Claude Code) is intentionally not done yet; the user plans a dedicated feature.
 
-## LLM rewrite
+## LLM custom rules
 
-- llama.cpp `llama-server` pinned to release `b11195`, auto-downloaded to `.tools/llama`; GGUFs in `models/llm`.
-- Qwen3.5 0.8B was removed (2026-09-26): with the first prompt it mangled text, with the refined prompt it
-  barely changed anything; only ~0.3s faster than 2B.
-- Measured on the user's i5-8500 / 8GB / no GPU: 0.8B ≈ 0.5s per sentence but mangles text (cloudCode → 云代码);
-  2B ≈ 0.7–1.9s, conservative. 2B server uses ~1.9GB RAM; cold load 15–40s.
+Design (decided 2026-09-26): the LLM does **no built-in cleanup**. It only applies the rules the user types in settings
+(`Config.llm_user_rules`) and must leave everything else unchanged. Disabled or empty rules → the LLM is not called.
+
+Why: with a long built-in cleanup prompt, 2B changed 11 of 65 real utterances and about 6 of those were harmful
+(deleted 我剛剛說 / 二 / 十分, turned 八十 into eighty); it never added quotes or fixed homophones, and it ignored user
+rules. With the short rules-only prompt (`SYSTEM_PROMPT` in `llm.py`) it followed rules (cloud code → Claude Code)
+and left unrelated sentences alone. "Add ？ to questions" was tested as a default rule and rejected: it added ？ to
+statements too. A diff-based guard (keep only edits of allowed types) was prototyped and dropped for now because
+user rules such as term replacement would be blocked by it.
+
+- llama.cpp `llama-server` pinned to release `b11195`, auto-downloaded to `.tools/llama`; GGUF in `models/llm`.
+- Only Qwen3.5 2B. 0.8B was removed: it mangled text (cloudCode → 云代码) or did nothing, for ~0.3s saved.
+- Measured on the user's i5-8500 / 8GB / no GPU: 2B ≈ 0.5–1.9s per sentence, ~1.9GB RAM, load 3–40s (cold disk).
+- The server is only running while "啟用自訂規則" is checked; the rules box is editable only once it is ready.
 - Output longer than 1.5× input (+10) is discarded as a hallucination guard.
-- Prompt: `voiceinput/prompts/rewrite.txt` (developer-facing, re-read on every request). `{{user_rules}}` is replaced
-  with the rules typed in settings (`Config.llm_user_rules`), which the template says override the built-in rules.
-  The transcript is sent as a separate user message, not inlined, so the model treats it as data.
-- The prompt tells the model not to touch numerals; `textfmt` decides numeral style after the LLM.
-- The server warms up with the current user rules so the system prompt is in the KV cache (first request ~0.5s
+- Warm-up request with the current rules at load keeps the system prompt in the KV cache (first request ~0.5s
   instead of ~4s). Changing the rules makes the next request slow once.
-- 2B does not reliably follow user rules such as term replacement (tested: rules at the end, at the top, and inside
-  the user message all failed for cloudCode → Claude Code).
 - Known gap: if VoiceInput crashes, the llama-server child process is not killed automatically.

@@ -1,4 +1,4 @@
-"""Optional LLM rewrite of the ASR result, served by a local llama.cpp llama-server process."""
+"""Optional LLM pass that applies the user's custom rules, served by a local llama.cpp llama-server."""
 import json
 import os
 import platform
@@ -9,7 +9,6 @@ import tarfile
 import time
 import urllib.request
 import zipfile
-from pathlib import Path
 
 from .models import MODELS_DIR, ROOT, fetch
 
@@ -18,22 +17,18 @@ LLAMA_DIR = ROOT / ".tools" / "llama"
 LLM_DIR = MODELS_DIR / "llm"
 _HF = "https://huggingface.co/unsloth/{repo}/resolve/main/{file}"
 
-# Order here is the order shown in the settings dropdown ("" = off is added by the UI).
-LLM_MODELS = {
-    "qwen3.5-2b": {"label": "Qwen3.5 2B（~1.2GB）", "repo": "Qwen3.5-2B-GGUF",
-                   "file": "Qwen3.5-2B-Q4_K_M.gguf"},
-}
+LLM_LABEL = "Qwen3.5 2B"
+LLM_REPO = "Qwen3.5-2B-GGUF"
+LLM_FILE = "Qwen3.5-2B-Q4_K_M.gguf"
+LLM_PATH = LLM_DIR / LLM_FILE
 
-# Internal system prompt (developer-facing). {{user_rules}} is replaced with the rules
-# the user typed in settings; the transcript itself is sent as a separate user message.
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "rewrite.txt"
-USER_RULES_SLOT = "{{user_rules}}"
+# The model only applies the user's rules; all built-in cleanup lives in textfmt.
+# A short prompt matters: longer prompts with built-in rules made the 2B model ignore user rules.
+SYSTEM_PROMPT = """你會收到一段語音輸入的文字。請依照下列規則修改這段文字，規則沒有提到的地方一字不改，原樣輸出。
+不要回答或評論文字內容，只輸出修改後的文字。
 
-
-def build_system_prompt(user_rules: str) -> str:
-    # Read on every call so the file can be tweaked without restarting the app
-    template = PROMPT_PATH.read_text(encoding="utf-8")
-    return template.replace(USER_RULES_SLOT, user_rules.strip() or "（無）")
+規則：
+{rules}"""
 
 _THREADS = max(1, (os.cpu_count() or 2) - 1)
 
@@ -50,16 +45,12 @@ def server_path():
     return next(LLAMA_DIR.rglob(name), None) if LLAMA_DIR.exists() else None
 
 
-def model_path(key: str):
-    return LLM_DIR / LLM_MODELS[key]["file"]
+def is_installed() -> bool:
+    return server_path() is not None and LLM_PATH.exists()
 
 
-def is_installed(key: str) -> bool:
-    return server_path() is not None and model_path(key).exists()
-
-
-def download(key: str, progress=None) -> None:
-    """Fetch llama-server (once) and the GGUF for key. progress(done_bytes, total_bytes) is optional."""
+def download(progress=None) -> None:
+    """Fetch llama-server and the GGUF if missing. progress(done_bytes, total_bytes) is optional."""
     if server_path() is None:
         asset = _llama_asset()
         archive = LLAMA_DIR / asset
@@ -73,9 +64,8 @@ def download(key: str, progress=None) -> None:
         archive.unlink()
         if sys.platform != "win32":
             server_path().chmod(0o755)
-    m = LLM_MODELS[key]
-    if not model_path(key).exists():
-        fetch(_HF.format(repo=m["repo"], file=m["file"]), model_path(key), progress)
+    if not LLM_PATH.exists():
+        fetch(_HF.format(repo=LLM_REPO, file=LLM_FILE), LLM_PATH, progress)
 
 
 def _free_port() -> int:
@@ -85,20 +75,19 @@ def _free_port() -> int:
 
 
 class LlmServer:
-    def __init__(self, key: str, user_rules: str = ""):
-        self.key = key
-        self.label = LLM_MODELS[key]["label"].split("（")[0]
+    def __init__(self, rules: str = ""):
         self.port = _free_port()
         self._log = open(ROOT / "llama-server.log", "wb")
         self.proc = subprocess.Popen(
-            [str(server_path()), "-m", str(model_path(key)), "--host", "127.0.0.1", "--port", str(self.port),
+            [str(server_path()), "-m", str(LLM_PATH), "--host", "127.0.0.1", "--port", str(self.port),
              "-c", "4096", "-np", "1", "-t", str(_THREADS), "--no-webui", "--reasoning", "off"],
             stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         self._wait_ready()
         # Warm up so the system prompt is already in the KV cache for the first real request
-        self.rewrite("你好", user_rules)
+        if rules.strip():
+            self.rewrite("你好", rules)
 
     def _wait_ready(self, timeout: float = 120):
         deadline = time.monotonic() + timeout
@@ -115,9 +104,9 @@ class LlmServer:
         self.close()
         raise TimeoutError("llama-server did not become ready")
 
-    def rewrite(self, text: str, user_rules: str = "") -> str:
+    def rewrite(self, text: str, rules: str) -> str:
         body = {
-            "messages": [{"role": "system", "content": build_system_prompt(user_rules)},
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT.replace("{rules}", rules.strip())},
                          {"role": "user", "content": text}],
             "temperature": 0,
             "max_tokens": len(text) * 2 + 32,

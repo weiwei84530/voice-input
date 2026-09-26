@@ -3,6 +3,7 @@ import logging
 import sys
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, Signal
@@ -45,8 +46,9 @@ class App(QObject):
     released = Signal(float)
     transcribed = Signal(str)
     rewriting = Signal()
+    record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
-    llm_status = Signal(str)
+    llm_status = Signal(str, str)  # state (off / loading / ready / error), text
 
     def __init__(self, qapp: QApplication):
         super().__init__()
@@ -58,9 +60,11 @@ class App(QObject):
         self.worker = ThreadPoolExecutor(max_workers=1)   # serializes model loads and transcription
         self._status_text = ""
         self._llm_status_text = ""
+        self._llm_state = ("off", "")
+        self._records = deque(maxlen=100)       # transcript log, kept for this session only
         self.llm: llm.LlmServer | None = None
-        self._llm_key = None
-        self._llm_gen = 0                       # bumps on every model switch; stale loads discard themselves
+        self._llm_wanted = None
+        self._llm_gen = 0                       # bumps on every enable/disable; stale loads discard themselves
         self._llm_lock = threading.Lock()       # serializes LLM downloads / server starts
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
@@ -86,6 +90,7 @@ class App(QObject):
         self.rewriting.connect(self.overlay.show_rewriting)
         self.status.connect(self.on_status)
         self.llm_status.connect(self.on_llm_status)
+        self.record.connect(self.on_record)
 
         self.ptt = PushToTalk(self.cfg.hotkey, self.pressed.emit, self.released.emit)
         self.ptt.start()
@@ -124,41 +129,42 @@ class App(QObject):
             self.status.emit(f"模型載入失敗：{e}")
 
     def load_llm(self):
-        key = self.cfg.llm_model if self.cfg.llm_model in llm.LLM_MODELS else ""
-        if key == self._llm_key:
+        """Start or stop the LLM server to match cfg.llm_enabled (the model is only loaded while enabled)."""
+        wanted = self.cfg.llm_enabled
+        if wanted == self._llm_wanted:
             return
-        self._llm_key = key
+        self._llm_wanted = wanted
         self._llm_gen += 1
         old, self.llm = self.llm, None
-        threading.Thread(target=self._load_llm_job, args=(self._llm_gen, key, old), daemon=True).start()
+        threading.Thread(target=self._load_llm_job, args=(self._llm_gen, wanted, old), daemon=True).start()
 
-    def _load_llm_job(self, gen, key, old):
+    def _load_llm_job(self, gen, wanted, old):
         with self._llm_lock:
             if old:
                 old.close()
             if gen != self._llm_gen:
                 return
-            if not key:
-                self.llm_status.emit("")
+            if not wanted:
+                self.llm_status.emit("off", "")
                 return
             try:
-                if not llm.is_installed(key):
+                if not llm.is_installed():
                     def progress(done, total):
                         pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
-                        self.llm_status.emit(f"LLM 下載中… {pct}")
-                    llm.download(key, progress)
-                self.llm_status.emit("LLM 載入中…")
+                        self.llm_status.emit("loading", f"模型下載中… {pct}")
+                    llm.download(progress)
+                self.llm_status.emit("loading", "模型載入中…")
                 t0 = time.monotonic()
-                server = llm.LlmServer(key, self.cfg.llm_user_rules)
-                log.info("llm %s loaded in %.1fs", key, time.monotonic() - t0)
+                server = llm.LlmServer(self.cfg.llm_user_rules)
+                log.info("llm loaded in %.1fs", time.monotonic() - t0)
                 if gen != self._llm_gen:
                     server.close()
                     return
                 self.llm = server
-                self.llm_status.emit(f"LLM：{server.label}")
+                self.llm_status.emit("ready", "已就緒")
             except Exception as e:
                 log.exception("llm load failed")
-                self.llm_status.emit(f"LLM 載入失敗：{e}")
+                self.llm_status.emit("error", f"載入失敗：{e}")
 
     # --- push-to-talk ---
     def on_press(self):
@@ -188,20 +194,36 @@ class App(QObject):
         self.worker.submit(self._transcribe_job, self.recognizer, audio)
 
     def _transcribe_job(self, rec, audio):
+        stamp = time.strftime("%H:%M:%S")
         try:
             t0 = time.monotonic()
             text = rec.transcribe(audio)
-            log.info("asr %.2fs: %s", time.monotonic() - t0, text)
-            server = self.llm
-            if text and server:
+            t_asr = time.monotonic() - t0
+            log.info("asr %.2fs: %s", t_asr, text)
+            entry = {"time": stamp, "asr": text, "asr_s": t_asr, "llm": "", "llm_s": None}
+            server, rules = self.llm, self.cfg.llm_user_rules.strip()
+            if not self.cfg.llm_enabled:
+                entry["llm"] = "（未啟用）"
+            elif not rules:
+                entry["llm"] = "（規則空白，略過）"
+            elif server is None:
+                entry["llm"] = "（模型尚未就緒，略過）"
+            elif not text:
+                entry["llm"] = "（沒有文字）"
+            else:
                 self.rewriting.emit()
                 t1 = time.monotonic()
                 try:
-                    text = server.rewrite(text, self.cfg.llm_user_rules)
-                    log.info("llm %s %.2fs: %s", server.key, time.monotonic() - t1, text)
-                except Exception:
+                    text = server.rewrite(text, rules)
+                    t_llm = time.monotonic() - t1
+                    log.info("llm %.2fs: %s", t_llm, text)
+                    entry.update(llm=text, llm_s=t_llm)
+                except Exception as e:
                     log.exception("llm rewrite failed; using ASR text")
-            text = format_text(text, self.cfg.strip_trailing_punct)
+                    entry["llm"] = f"（失敗：{e}）"
+            entry["final"] = format_text(text, self.cfg.strip_trailing_punct)
+            text = entry["final"]
+            self.record.emit(entry)
         except Exception:
             log.exception("transcribe failed")
             text = ""
@@ -218,10 +240,16 @@ class App(QObject):
         log.info("status: %s", text)
         self._show_status()
 
-    def on_llm_status(self, text: str):
-        self._llm_status_text = text
-        log.info("llm status: %s", text)
+    def on_llm_status(self, state: str, text: str):
+        self._llm_state = (state, text)
+        self._llm_status_text = f"LLM：{text}" if text else ""
+        log.info("llm status: %s %s", state, text)
+        self.settings.set_llm_state(state, text)
         self._show_status()
+
+    def on_record(self, entry: dict):
+        self._records.append(entry)
+        self.settings.append_log(entry)
 
     def _status_line(self) -> str:
         return "　".join(t for t in (self._status_text, self._llm_status_text) if t)
@@ -232,6 +260,8 @@ class App(QObject):
 
     def open_settings(self):
         self.settings.load_values()
+        self.settings.set_llm_state(*self._llm_state)
+        self.settings.set_log(self._records)
         self.settings.set_status(self._status_line())
         self.settings.show()
         self.settings.raise_()

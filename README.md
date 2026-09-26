@@ -18,7 +18,8 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
-- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login, LLM rewrite). Changes apply immediately.
+- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
+  and shows a per-utterance log (ASR / LLM / final text) for this session. Changes apply immediately.
 - If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
 
 ## Model
@@ -28,14 +29,14 @@ Previously evaluated alternatives are recorded in `CLAUDE.md`.
 
 ## Pipeline
 
-ASR → optional LLM rewrite → formatting (`textfmt.py`) → paste.
+ASR → optional LLM custom rules → formatting (`textfmt.py`) → paste.
 
-- **LLM rewrite** (off by default): Qwen3.5 0.8B / 2B (Q4_K_M GGUF) served by a local `llama-server`
-  (llama.cpp, CPU build in `.tools/llama`). Downloaded on first selection. Built-in prompt:
-  `voiceinput/prompts/rewrite.txt`; extra rules typed in settings are inserted at `{{user_rules}}` and take priority.
+- **LLM custom rules** (off by default): Qwen3.5 2B (Q4_K_M GGUF) served by a local `llama-server`
+  (llama.cpp, CPU build in `.tools/llama`), downloaded and loaded only while enabled. It applies only the rules
+  typed in settings and leaves everything else unchanged; with no rules it is skipped.
   Timings are written to `voiceinput.log`.
 - **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), multi-character Chinese numerals → digits
-  (single-character ones like 一個 / 兩個 stay), 百分之X / X percent → X%, spelled letters joined (A P I → API), 點 between digits/letters → `.`,
+  (single-character ones like 一個 / 兩個 stay), 百分之X / X percent → X%, 嗯 / 呃 removed, spelled letters joined (A P I → API), 點 between digits/letters → `.`,
   half-width punctuation inside English, a space between CJK and English/digits, optional trailing punctuation removal.
 
 ## Layout
@@ -46,10 +47,10 @@ voiceinput/
   hotkey.py    global hotkey (pynput; Windows low-level hook suppresses CapsLock)
   audio.py     microphone capture
   asr.py       sherpa-onnx recognizer
-  llm.py       llama-server lifecycle + LLM rewrite
+  llm.py       llama-server lifecycle + custom-rule rewrite
   textfmt.py   final text formatting
   overlay.py   floating recording / thinking indicator
-  settings.py  settings dialog
+  settings.py  settings dialog + transcript log
   output.py    clipboard paste
   models.py    model location + downloader
   autostart.py launch at login

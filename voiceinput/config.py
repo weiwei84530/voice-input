@@ -13,8 +13,8 @@ class Config:
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
-    llm_model: str = ""            # key in llm.LLM_MODELS, "" = off
-    llm_user_rules: str = ""       # extra LLM rules from settings; override the internal prompt
+    llm_enabled: bool = False      # run the local LLM with llm_user_rules (model only loaded when on)
+    llm_user_rules: str = ""       # custom rules the LLM applies; empty = LLM is skipped
 
     @classmethod
     def load(cls) -> "Config":

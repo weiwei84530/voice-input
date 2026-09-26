@@ -43,6 +43,7 @@ _HALF = str.maketrans("，。？！；：", ",.?!;:")
 _SPACE_CJK_ASCII = re.compile(f"([{CJK}])\\s*([A-Za-z0-9])")
 _SPACE_ASCII_CJK = re.compile(f"([A-Za-z0-9%])\\s*([{CJK}])")
 _TRAILING_PUNCT = re.compile(r"[。，,.]+$")
+_FILLER = re.compile(r"[嗯呃]+[，,、。]?\s*")
 
 
 def _parse_section(s: str) -> int | None:
@@ -126,6 +127,7 @@ def _percent(m):
 
 def format_text(text: str, strip_trailing_punct: bool = True) -> str:
     text = _s2tw.convert(text)
+    text = _FILLER.sub("", text)
     text = _PERCENT.sub(_percent, text)
     text = _convert_numbers(text)
     text = _SPELLED.sub(lambda m: m.group(0).replace(" ", "").upper(), text)
