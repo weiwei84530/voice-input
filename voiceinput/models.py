@@ -54,10 +54,19 @@ def set_models_dir(path: Path) -> None:
     _models_dir = path
 
 
+def is_subfolder(path: Path, parent: Path) -> bool:
+    """True if path lies strictly inside parent. Moving the models there would move folders into themselves
+    (e.g. choosing <models>/llm moved the ASR models into llm/ and left duplicates behind)."""
+    path, parent = path.resolve(), parent.resolve()
+    return path != parent and path.is_relative_to(parent)
+
+
 def move_models_dir(new: Path) -> None:
     """Move the downloaded models into new and switch to it. Only known model folders are moved, so a folder
     shared with other files is never emptied; entries that already exist in new are left in place."""
     old = _models_dir
+    if is_subfolder(new, old):
+        raise ValueError("新的模型資料夾不能在目前的模型資料夾裡面")
     new.mkdir(parents=True, exist_ok=True)
     for name in [m["dir"] for m in MODELS.values()] + [LLM_SUBDIR]:
         src, dst = old / name, new / name

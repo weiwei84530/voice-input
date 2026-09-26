@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
 
 from . import audio, hotwords, llm
 from .paths import DEFAULT_MODELS_DIR
-from .models import MODELS, is_installed
+from .models import MODELS, is_installed, is_subfolder
 from .hotkey import HOTKEYS
 
 RULES_HINT = "例如：\n- 「cloud code」一律寫成「Claude Code」\n- 「那個」不要刪"
@@ -213,7 +213,11 @@ class SettingsDialog(QDialog):
             self._set_models_dir(path)
 
     def _set_models_dir(self, path: str):
-        self._show_models_dir(Path(path) if path else DEFAULT_MODELS_DIR)
+        new = Path(path) if path else DEFAULT_MODELS_DIR
+        if is_subfolder(new, self.cfg.models_path()):
+            self.set_status("新的模型資料夾不能在目前的模型資料夾裡面，請選別的資料夾。")
+            return
+        self._show_models_dir(new)
         self.models_dir_chosen.emit(path)
 
     def _save_rules(self):
