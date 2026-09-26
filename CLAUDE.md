@@ -7,13 +7,12 @@
   the recommended option first.
 - Don't guess between materially different designs; asking is cheaper than rebuilding.
 
-## ASR model
+## ASR models
 
-The app ships with a single model: **X-ASR** int8 zipformer transducer
-(`sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03`, see `voiceinput/models.py`).
-There is no model picker in the UI on purpose.
+Four sherpa-onnx models are selectable in settings (`voiceinput/models.py`), default **X-ASR** int8.
+The picker was removed once and restored on 2026-09-26 at the user's request. Loader code lives in `asr.py`.
 
-### Previously supported alternatives (removed, kept here for reference)
+### Model notes
 
 Benchmarks: 18s zh/en test audio, CPU, `num_threads = min(4, cpu_count // 2)`.
 

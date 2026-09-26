@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QLabel, QPlainTextEdit, QTextBrowser, QVBoxLayout)
 
 from . import audio, llm
+from .models import MODELS, is_installed
 from .hotkey import HOTKEYS
 
 RULES_HINT = "例如：\n- 「cloud code」一律寫成「Claude Code」\n- 「那個」不要刪"
@@ -22,6 +23,10 @@ class SettingsDialog(QDialog):
         self._llm_state = "off"
         self.setWindowTitle("VoiceInput 設定")
         self.resize(940, 480)
+
+        self.model = QComboBox()
+        for key, m in MODELS.items():
+            self.model.addItem(m["label"], key)
 
         self.mic = QComboBox()
         self.mic.addItem("系統預設", "")
@@ -54,6 +59,7 @@ class SettingsDialog(QDialog):
         self.status.setWordWrap(True)
 
         form = QFormLayout()
+        form.addRow("語音模型", self.model)
         form.addRow("麥克風", self.mic)
         form.addRow("錄音快捷鍵（按住）", self.hotkey)
         form.addRow("", self.strip_punct)
@@ -89,13 +95,17 @@ class SettingsDialog(QDialog):
         layout.addLayout(cols, 1)
         layout.addWidget(buttons)
 
-        for combo in (self.mic, self.hotkey):
+        for combo in (self.model, self.mic, self.hotkey):
             combo.currentIndexChanged.connect(self._apply)
         for box in (self.strip_punct, self.autostart, self.llm_enabled):
             box.toggled.connect(self._apply)
 
     def load_values(self):
         self._loading = True
+        for i in range(self.model.count()):
+            key = self.model.itemData(i)
+            self.model.setItemText(i, MODELS[key]["label"] + ("" if is_installed(key) else "（未下載）"))
+        self._select(self.model, self.cfg.model)
         self._select(self.mic, self.cfg.mic)
         self._select(self.hotkey, self.cfg.hotkey)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
@@ -149,6 +159,7 @@ class SettingsDialog(QDialog):
     def _apply(self):
         if self._loading:
             return
+        self.cfg.model = self.model.currentData()
         self.cfg.mic = self.mic.currentData()
         self.cfg.hotkey = self.hotkey.currentData()
         self.cfg.strip_trailing_punct = self.strip_punct.isChecked()

@@ -18,14 +18,20 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
-- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
+- Left-click the tray icon to open settings (speech model, microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
   and shows a per-utterance log (ASR / LLM / final text) for this session. Changes apply immediately.
 - If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
 
-## Model
+## Models
 
-X-ASR int8 zipformer transducer (zh/en, punctuation, ~130MB, ~0.75s for 18s of audio on CPU).
-Previously evaluated alternatives are recorded in `CLAUDE.md`.
+Selectable in settings; a model that isn't downloaded yet is fetched automatically when selected.
+
+| Model | Size | 18s audio (CPU) | Notes |
+|---|---|---|---|
+| X-ASR (default) | 130MB | ~0.75s | Punctuation, good English |
+| SenseVoice Small | 155MB | ~0.8s | Punctuation, numbers as digits, weaker English |
+| Qwen3-ASR 0.6B | 840MB | ~4.4s | Most accurate |
+| Fun-ASR-Nano (fp16) | 1GB | ~7.5s | The int8 build returns empty output on some CPUs |
 
 ## Pipeline
 
@@ -46,12 +52,12 @@ voiceinput/
   app.py       tray, wiring, push-to-talk flow
   hotkey.py    global hotkey (pynput; Windows low-level hook suppresses CapsLock)
   audio.py     microphone capture
-  asr.py       sherpa-onnx recognizer
+  asr.py       sherpa-onnx recognizers
   llm.py       llama-server lifecycle + custom-rule rewrite
   textfmt.py   final text formatting
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log
   output.py    clipboard paste
-  models.py    model location + downloader
+  models.py    ASR model registry + downloader
   autostart.py launch at login
 ```

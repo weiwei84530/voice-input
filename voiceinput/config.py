@@ -2,13 +2,14 @@
 import json
 from dataclasses import asdict, dataclass
 
-from .models import ROOT
+from .models import DEFAULT_MODEL, ROOT
 
 CONFIG_PATH = ROOT / "config.json"
 
 
 @dataclass
 class Config:
+    model: str = DEFAULT_MODEL     # key in models.MODELS
     mic: str = ""                  # input device name, "" = system default
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False

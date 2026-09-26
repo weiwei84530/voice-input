@@ -94,7 +94,7 @@ class App(QObject):
 
         self.ptt = PushToTalk(self.cfg.hotkey, self.pressed.emit, self.released.emit)
         self.ptt.start()
-        self.load_model()
+        self.load_model(self.cfg.model if self.cfg.model in models.MODELS else models.DEFAULT_MODEL)
         self.load_llm()
 
     @staticmethod
@@ -110,20 +110,23 @@ class App(QObject):
             return True
 
     # --- model ---
-    def load_model(self):
+    def load_model(self, key: str):
+        self._model_key = key
         self.recognizer = None
-        self.worker.submit(self._load_model_job)
+        self.worker.submit(self._load_model_job, key)
 
-    def _load_model_job(self):
+    def _load_model_job(self, key: str):
         try:
-            if not models.is_installed():
+            if not models.is_installed(key):
                 def progress(done, total):
                     pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
                     self.status.emit(f"下載模型中… {pct}")
-                models.download(progress)
+                models.download(key, progress)
             self.status.emit("載入模型中…")
-            self.recognizer = Recognizer()
-            self.status.emit(f"就緒：{models.MODEL_LABEL}")
+            rec = Recognizer(key)
+            if key == self.cfg.model:   # ignore a load the user already switched away from
+                self.recognizer = rec
+                self.status.emit(f"就緒：{models.MODELS[key]['short']}")
         except Exception as e:
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
@@ -274,6 +277,8 @@ class App(QObject):
         except Exception as e:
             log.exception("autostart failed")
             self.settings.set_status(f"開機啟動設定失敗：{e}")
+        if self.cfg.model != self._model_key:
+            self.load_model(self.cfg.model)
         self.load_llm()
 
     def quit(self):
