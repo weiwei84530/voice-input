@@ -7,6 +7,15 @@
 - Don't guess between materially different designs; asking is cheaper than rebuilding.
 - Ask clarifying questions with the AskUserQuestion tool (when available); use it freely.
 
+## File layout
+
+Decided 2026-09-26 (the user plans to share the app with other users): code and runtime tools (`.tools/`, `.venv/`)
+stay in the app folder; user data lives in `paths.DATA_DIR` (`%LOCALAPPDATA%\VoiceInput`): `config.json`, logs, lock
+and `models/`. The models folder can be changed in settings (`Config.models_dir`); changing it moves the known
+model folders over. `paths.migrate_legacy()` moves the old in-app-folder data on first launch. Autostart is
+re-registered on every launch so it follows the app if its folder moves. Next step, not started: package as an exe
+with an installer (PyInstaller + Inno Setup).
+
 ## ASR models
 
 Four sherpa-onnx models are selectable in settings (`voiceinput/models.py`), default **X-ASR** int8.

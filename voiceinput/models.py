@@ -1,11 +1,13 @@
 """ASR model registry and downloader (sherpa-onnx pre-converted models)."""
+import shutil
 import sys
 import tarfile
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-MODELS_DIR = ROOT / "models"
+from .paths import DEFAULT_MODELS_DIR
+
+LLM_SUBDIR = "llm"   # the LLM's GGUF lives in <models dir>/llm
 BASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
 
 # Order here is the order shown in the settings dropdown.
@@ -40,8 +42,32 @@ MODELS = {
 DEFAULT_MODEL = "xasr"
 
 
+_models_dir = DEFAULT_MODELS_DIR
+
+
+def models_dir() -> Path:
+    return _models_dir
+
+
+def set_models_dir(path: Path) -> None:
+    global _models_dir
+    _models_dir = path
+
+
+def move_models_dir(new: Path) -> None:
+    """Move the downloaded models into new and switch to it. Only known model folders are moved, so a folder
+    shared with other files is never emptied; entries that already exist in new are left in place."""
+    old = _models_dir
+    new.mkdir(parents=True, exist_ok=True)
+    for name in [m["dir"] for m in MODELS.values()] + [LLM_SUBDIR]:
+        src, dst = old / name, new / name
+        if src.exists() and not dst.exists():
+            shutil.move(src, dst)
+    set_models_dir(new)
+
+
 def model_dir(key: str) -> Path:
-    return MODELS_DIR / MODELS[key]["dir"]
+    return _models_dir / MODELS[key]["dir"]
 
 
 def is_installed(key: str) -> bool:
@@ -69,10 +95,10 @@ def download(key: str, progress=None) -> None:
     if is_installed(key):
         return
     name = MODELS[key]["dir"] + ".tar.bz2"
-    archive = MODELS_DIR / name
+    archive = _models_dir / name
     fetch(BASE_URL + name, archive, progress)
     with tarfile.open(archive, "r:bz2") as tar:
-        tar.extractall(MODELS_DIR, filter="data")
+        tar.extractall(_models_dir, filter="data")
     archive.unlink()
     if not is_installed(key):
         raise RuntimeError(f"Model {key} extracted but expected files are missing in {model_dir(key)}")
@@ -88,6 +114,10 @@ def _cli_progress(done, total):
 
 
 if __name__ == "__main__":
+    from .config import Config
+    from .paths import migrate_legacy
+    migrate_legacy()
+    set_models_dir(Config.load().models_path())
     keys = sys.argv[1:] or [DEFAULT_MODEL]
     for k in keys:
         if is_installed(k):

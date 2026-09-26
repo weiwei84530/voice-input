@@ -1,11 +1,14 @@
 """Settings window with a live transcript log. Every change is applied and saved immediately."""
 import html
+from pathlib import Path
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-                               QLabel, QPlainTextEdit, QTextBrowser, QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QTextBrowser,
+                               QVBoxLayout)
 
 from . import audio, llm
+from .paths import DEFAULT_MODELS_DIR
 from .models import MODELS, is_installed
 from .hotkey import HOTKEYS
 
@@ -15,6 +18,7 @@ RULES_NOTE = "LLM 會逐字照規則執行，例如寫「句尾加句號」，�
 
 class SettingsDialog(QDialog):
     applied = Signal()
+    models_dir_chosen = Signal(str)   # new models folder, "" = default
 
     def __init__(self, cfg):
         super().__init__()
@@ -36,6 +40,14 @@ class SettingsDialog(QDialog):
         self.hotkey = QComboBox()
         for key, (label, _) in HOTKEYS.items():
             self.hotkey.addItem(label, key)
+
+        self.models_dir = QLineEdit(readOnly=True)
+        browse = QPushButton("變更…", clicked=self._choose_models_dir)
+        reset = QPushButton("預設", clicked=lambda: self._set_models_dir(""))
+        models_dir_row = QHBoxLayout()
+        models_dir_row.addWidget(self.models_dir, 1)
+        models_dir_row.addWidget(browse)
+        models_dir_row.addWidget(reset)
 
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
@@ -60,6 +72,7 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("語音模型", self.model)
+        form.addRow("模型資料夾", models_dir_row)
         form.addRow("麥克風", self.mic)
         form.addRow("錄音快捷鍵（按住）", self.hotkey)
         form.addRow("", self.strip_punct)
@@ -106,6 +119,7 @@ class SettingsDialog(QDialog):
             key = self.model.itemData(i)
             self.model.setItemText(i, MODELS[key]["label"] + ("" if is_installed(key) else "（未下載）"))
         self._select(self.model, self.cfg.model)
+        self._show_models_dir(self.cfg.models_path())
         self._select(self.mic, self.cfg.mic)
         self._select(self.hotkey, self.cfg.hotkey)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
@@ -164,6 +178,20 @@ class SettingsDialog(QDialog):
         self.cfg.save()
         self._update_rules_enabled()
         self.applied.emit()
+
+    def _show_models_dir(self, path: Path):
+        self.models_dir.setText(str(path))
+        self.models_dir.setToolTip(str(path))
+
+    def _choose_models_dir(self):
+        path = QFileDialog.getExistingDirectory(self, "選擇模型資料夾（已下載的模型會搬過去）",
+                                                str(self.cfg.models_path()))
+        if path:
+            self._set_models_dir(path)
+
+    def _set_models_dir(self, path: str):
+        self._show_models_dir(Path(path) if path else DEFAULT_MODELS_DIR)
+        self.models_dir_chosen.emit(path)
 
     def _save_rules(self):
         self.cfg.llm_user_rules = self.rules.toPlainText()

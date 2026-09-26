@@ -2,10 +2,10 @@
 import sys
 from pathlib import Path
 
-from .models import ROOT
+from .paths import APP_DIR
 
 APP_ID = "VoiceInput"
-LAUNCHER = ROOT / "run.pyw"
+LAUNCHER = APP_DIR / "run.pyw"
 
 
 def _python() -> str:
@@ -37,7 +37,7 @@ def set_enabled(enabled: bool) -> None:
 <plist version="1.0"><dict>
   <key>Label</key><string>com.voiceinput.app</string>
   <key>ProgramArguments</key><array><string>{_python()}</string><string>{LAUNCHER}</string></array>
-  <key>WorkingDirectory</key><string>{ROOT}</string>
+  <key>WorkingDirectory</key><string>{APP_DIR}</string>
   <key>RunAtLoad</key><true/>
 </dict></plist>
 """)

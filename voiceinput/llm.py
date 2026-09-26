@@ -10,17 +10,21 @@ import time
 import urllib.request
 import zipfile
 
-from .models import MODELS_DIR, ROOT, fetch
+from . import models
+from .models import fetch
+from .paths import APP_DIR, LLAMA_LOG_PATH
 
 LLAMA_TAG = "b11195"
-LLAMA_DIR = ROOT / ".tools" / "llama"
-LLM_DIR = MODELS_DIR / "llm"
+LLAMA_DIR = APP_DIR / ".tools" / "llama"
 _HF = "https://huggingface.co/unsloth/{repo}/resolve/main/{file}"
 
 LLM_LABEL = "Qwen3.5 2B"
 LLM_REPO = "Qwen3.5-2B-GGUF"
 LLM_FILE = "Qwen3.5-2B-Q4_K_M.gguf"
-LLM_PATH = LLM_DIR / LLM_FILE
+
+
+def llm_path():
+    return models.models_dir() / models.LLM_SUBDIR / LLM_FILE
 
 # The model only applies the user's rules; all built-in cleanup lives in textfmt.
 # A short prompt matters: longer prompts with built-in rules made the 2B model ignore user rules.
@@ -46,7 +50,7 @@ def server_path():
 
 
 def is_installed() -> bool:
-    return server_path() is not None and LLM_PATH.exists()
+    return server_path() is not None and llm_path().exists()
 
 
 def download(progress=None) -> None:
@@ -64,8 +68,8 @@ def download(progress=None) -> None:
         archive.unlink()
         if sys.platform != "win32":
             server_path().chmod(0o755)
-    if not LLM_PATH.exists():
-        fetch(_HF.format(repo=LLM_REPO, file=LLM_FILE), LLM_PATH, progress)
+    if not llm_path().exists():
+        fetch(_HF.format(repo=LLM_REPO, file=LLM_FILE), llm_path(), progress)
 
 
 def _free_port() -> int:
@@ -77,9 +81,9 @@ def _free_port() -> int:
 class LlmServer:
     def __init__(self, rules: str = ""):
         self.port = _free_port()
-        self._log = open(ROOT / "llama-server.log", "wb")
+        self._log = open(LLAMA_LOG_PATH, "wb")
         self.proc = subprocess.Popen(
-            [str(server_path()), "-m", str(LLM_PATH), "--host", "127.0.0.1", "--port", str(self.port),
+            [str(server_path()), "-m", str(llm_path()), "--host", "127.0.0.1", "--port", str(self.port),
              "-c", "4096", "-np", "1", "-t", str(_THREADS), "--no-webui", "--reasoning", "off"],
             stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,

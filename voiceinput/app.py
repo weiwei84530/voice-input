@@ -4,13 +4,14 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, llm, models
+from . import autostart, llm, models, paths
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -49,11 +50,13 @@ class App(QObject):
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
     llm_status = Signal(str, str)  # state (off / loading / ready / error), text
+    models_moved = Signal()
 
     def __init__(self, qapp: QApplication):
         super().__init__()
         self.qapp = qapp
         self.cfg = Config.load()
+        models.set_models_dir(self.cfg.models_path())
         self.recorder = Recorder()
         self.recognizer: Recognizer | None = None
         self.recording = False
@@ -73,6 +76,7 @@ class App(QObject):
         self.overlay = Overlay(lambda: self.recorder.level)
         self.settings = SettingsDialog(self.cfg)
         self.settings.applied.connect(self.apply_settings)
+        self.settings.models_dir_chosen.connect(self.change_models_dir)
 
         self.tray = QSystemTrayIcon(self.icon_idle)
         menu = QMenu()
@@ -91,11 +95,14 @@ class App(QObject):
         self.status.connect(self.on_status)
         self.llm_status.connect(self.on_llm_status)
         self.record.connect(self.on_record)
+        self.models_moved.connect(self.load_llm)
 
         self.ptt = PushToTalk(self.cfg.hotkey, self.pressed.emit, self.released.emit)
         self.ptt.start()
         self.load_model(self.cfg.model if self.cfg.model in models.MODELS else models.DEFAULT_MODEL)
         self.load_llm()
+        if self.cfg.autostart:
+            self._set_autostart()   # re-register so the entry follows the app if its folder was moved
 
     @staticmethod
     def _dark_taskbar() -> bool:
@@ -130,6 +137,35 @@ class App(QObject):
         except Exception as e:
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
+
+    def change_models_dir(self, path: str):
+        """Move the downloaded models to path (empty = default folder), then reload the ASR model and LLM."""
+        new = Path(path) if path else paths.DEFAULT_MODELS_DIR
+        if new.resolve() == models.models_dir().resolve():
+            return
+        self.recognizer = None
+        # Stop the LLM (its GGUF is held open) and keep it stopped until the move is done
+        self._llm_wanted = None
+        self._llm_gen += 1
+        old_llm, self.llm = self.llm, None
+        self.llm_status.emit("off", "")
+        self.worker.submit(self._move_models_job, new, old_llm)
+
+    def _move_models_job(self, new: Path, old_llm):
+        with self._llm_lock:
+            if old_llm:
+                old_llm.close()
+            self.status.emit("搬移模型中…")
+            try:
+                models.move_models_dir(new)
+                self.cfg.models_dir = "" if new == paths.DEFAULT_MODELS_DIR else str(new)
+                self.cfg.save()
+                log.info("models dir: %s", new)
+            except Exception as e:
+                log.exception("moving models failed")
+                self.status.emit(f"搬移模型失敗：{e}")
+        self._load_model_job(self._model_key)
+        self.models_moved.emit()
 
     def load_llm(self):
         """Start or stop the LLM server to match cfg.llm_enabled (the model is only loaded while enabled)."""
@@ -274,14 +310,17 @@ class App(QObject):
 
     def apply_settings(self):
         self.ptt.set_key(self.cfg.hotkey)
+        self._set_autostart()
+        if self.cfg.model != self._model_key:
+            self.load_model(self.cfg.model)
+        self.load_llm()
+
+    def _set_autostart(self):
         try:
             autostart.set_enabled(self.cfg.autostart)
         except Exception as e:
             log.exception("autostart failed")
             self.settings.set_status(f"開機啟動設定失敗：{e}")
-        if self.cfg.model != self._model_key:
-            self.load_model(self.cfg.model)
-        self.load_llm()
 
     def quit(self):
         self.ptt.stop()
@@ -292,16 +331,17 @@ class App(QObject):
 
 
 def main():
+    paths.migrate_legacy()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(models.ROOT / "voiceinput.log", encoding="utf-8"),
+        handlers=[logging.FileHandler(paths.LOG_PATH, encoding="utf-8"),
                   logging.StreamHandler()],
     )
     qapp = QApplication(sys.argv)
     qapp.setQuitOnLastWindowClosed(False)
 
-    lock = QLockFile(str(models.ROOT / ".voiceinput.lock"))
+    lock = QLockFile(str(paths.LOCK_PATH))
     if not lock.tryLock(100):
         log.info("already running")
         return 0

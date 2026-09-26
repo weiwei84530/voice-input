@@ -10,15 +10,24 @@ Single process: one tray icon, settings window, floating indicator. Speech recog
 | Install | `install.bat` | `bash install.command` |
 | Run | `start.bat` | `./start.command` |
 
-The installer puts uv, Python, the venv and models inside this folder. Nothing is installed system-wide.
-If you move the folder, run the installer again.
+The installer puts uv, Python and the venv inside this folder. Nothing is installed system-wide.
+If you move the folder, run the installer again (the venv records absolute paths).
+
+User data lives outside the app folder, so it survives moving or reinstalling the app:
+
+| | Windows | macOS |
+|---|---|---|
+| Settings, logs | `%LOCALAPPDATA%\VoiceInput` | `~/Library/Application Support/VoiceInput` |
+| Models (default, changeable in settings) | `%LOCALAPPDATA%\VoiceInput\models` | `…/VoiceInput/models` |
+
+Data from the old layout (`config.json`, `models/` inside the app folder) is moved there automatically on first launch.
 
 macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Monitoring** in System Settings → Privacy & Security.
 
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
-- Left-click the tray icon to open settings (speech model, microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
+- Left-click the tray icon to open settings (speech model, models folder, microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
   and shows a per-utterance log (ASR / formatted / LLM) for this session. Changes apply immediately.
 - If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
 
@@ -59,5 +68,6 @@ voiceinput/
   settings.py  settings dialog + transcript log
   output.py    clipboard paste
   models.py    ASR model registry + downloader
+  paths.py     app folder vs per-user data folder, legacy data migration
   autostart.py launch at login
 ```
