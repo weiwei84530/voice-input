@@ -5,6 +5,7 @@
 - Whenever you can infer what the user is really after and see a better approach or a missing detail,
   stop and ask before building, as many rounds as needed, with the recommended option first.
 - Don't guess between materially different designs; asking is cheaper than rebuilding.
+- Ask clarifying questions with the AskUserQuestion tool (when available); use it freely.
 
 ## ASR models
 
