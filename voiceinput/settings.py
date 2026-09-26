@@ -125,7 +125,8 @@ class SettingsDialog(QDialog):
         self._update_rules_enabled()
 
     def set_log(self, entries):
-        """Render entries newest first. Each entry: time, asr, asr_s, llm, llm_s, final (llm_s None = not run)."""
+        """Render entries newest first, in pipeline order. Each entry: time, asr, asr_s, fmt, llm, llm_s
+        (llm None = LLM disabled, row hidden; llm_s None = LLM did not run, fmt is what was pasted)."""
         def row(label, secs, text, color=""):
             t = f"{secs:.2f}s" if secs is not None else ""
             style = f" style='color:{color}'" if color else ""
@@ -135,8 +136,9 @@ class SettingsDialog(QDialog):
         def block(e):
             return (f"<div style='color:gray'>{e['time']}</div><table cellspacing=0 cellpadding=2>"
                     + row("ASR", e["asr_s"], e["asr"])
-                    + row("LLM", e["llm_s"], e["llm"], "" if e["llm_s"] is not None else "gray")
-                    + row("最終", None, e["final"])
+                    + row("格式", None, e["fmt"])
+                    + ("" if e["llm"] is None else
+                       row("LLM", e["llm_s"], e["llm"], "" if e["llm_s"] is not None else "gray"))
                     + "</table>")
 
         self.log.setHtml("<br>".join(block(e) for e in reversed(entries)))

@@ -204,12 +204,13 @@ class App(QObject):
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s", t_asr, text)
             entry = {"time": stamp, "asr": to_traditional(text), "asr_s": t_asr, "llm": "", "llm_s": None}
-            # Format before the LLM so it sees Traditional Chinese, joined letters and digits (matching how the
-            # user writes rules), and again after it in case the LLM undid any formatting. format_text is idempotent.
+            # Format before the LLM so it sees Traditional Chinese, joined letters and digits, matching how the
+            # user writes rules. No formatting after it: that would override rules such as "add a trailing period".
             text = format_text(text, self.cfg.strip_trailing_punct)
+            entry["fmt"] = text
             server, rules = self.llm, self.cfg.llm_user_rules.strip()
             if not self.cfg.llm_enabled:
-                entry["llm"] = "（未啟用）"
+                entry["llm"] = None  # hidden in the log
             elif not rules:
                 entry["llm"] = "（規則空白，略過）"
             elif server is None:
@@ -227,8 +228,6 @@ class App(QObject):
                 except Exception as e:
                     log.exception("llm rewrite failed; using ASR text")
                     entry["llm"] = f"（失敗：{e}）"
-            entry["final"] = format_text(text, self.cfg.strip_trailing_punct)
-            text = entry["final"]
             self.record.emit(entry)
         except Exception:
             log.exception("transcribe failed")

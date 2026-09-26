@@ -19,7 +19,7 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
 - Left-click the tray icon to open settings (speech model, microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
-  and shows a per-utterance log (ASR / LLM / final text) for this session. Changes apply immediately.
+  and shows a per-utterance log (ASR / formatted / LLM) for this session. Changes apply immediately.
 - If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
 
 ## Models
@@ -35,7 +35,7 @@ Selectable in settings; a model that isn't downloaded yet is fetched automatical
 
 ## Pipeline
 
-ASR → formatting (`textfmt.py`) → optional LLM custom rules → formatting again → paste.
+ASR → formatting (`textfmt.py`) → optional LLM custom rules → paste.
 
 - **LLM custom rules** (off by default): Qwen3.5 2B (Q4_K_M GGUF) served by a local `llama-server`
   (llama.cpp, CPU build in `.tools/llama`), downloaded and loaded only while enabled. It applies only the rules
