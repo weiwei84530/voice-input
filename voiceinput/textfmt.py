@@ -5,6 +5,10 @@ import opencc
 
 _s2tw = opencc.OpenCC("s2tw")  # glyphs only; s2twp would also swap vocabulary (程序 -> 程式)
 
+
+def to_traditional(text: str) -> str:
+    return _s2tw.convert(text)
+
 CJK = r"㐀-䶿一-鿿"
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4,
            "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}

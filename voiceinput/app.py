@@ -18,7 +18,7 @@ from .hotkey import TAP_THRESHOLD, PushToTalk
 from .output import paste_text
 from .overlay import Overlay
 from .settings import SettingsDialog
-from .textfmt import format_text
+from .textfmt import format_text, to_traditional
 
 log = logging.getLogger("voiceinput")
 
@@ -203,7 +203,7 @@ class App(QObject):
             text = rec.transcribe(audio)
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s", t_asr, text)
-            entry = {"time": stamp, "asr": text, "asr_s": t_asr, "llm": "", "llm_s": None}
+            entry = {"time": stamp, "asr": to_traditional(text), "asr_s": t_asr, "llm": "", "llm_s": None}
             # Format before the LLM so it sees Traditional Chinese, joined letters and digits (matching how the
             # user writes rules), and again after it in case the LLM undid any formatting. format_text is idempotent.
             text = format_text(text, self.cfg.strip_trailing_punct)
