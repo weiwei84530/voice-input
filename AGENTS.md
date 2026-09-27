@@ -100,7 +100,12 @@ user rules such as term replacement would be blocked by it.
   Qwen3.5 2B. MiniCPM5 2B/1B, LFM2.5 1.2B and the Chinese correction models (chinese-text-correction 1.5B,
   ChineseErrorCorrector3 4B) all damage more normal sentences and fix fewer repeats. Four prompt styles moved 2B only
   between 14–18/44 repeats fixed, so the prompt is not the bottleneck. Homophones by context: 0/25 for every
-  general model. Thinking mode on 2B never finishes (>4096 tokens, ~4 min per sentence).
+  general model.
+- Thinking mode on 2B (tested 2026-09-27, `--reasoning-budget`): unbounded it loops ("Wait, is there a repetition…")
+  past 4096 tokens. Budget 256: repeats fixed 21/44 vs 18/44 without thinking, homophones still 0, ~20s per sentence;
+  asking for brief thinking did not help (18/44). Budget 1024: 4/19 hard cases vs 3/19 at 256, ~80s per sentence.
+  It thinks in English, restates the rules first (~200 tokens) and does not know the homophones (guessed 城市 → 規範).
+  Not worth it.
 - 2B cannot follow descriptive / example-style rules ("請依照語義修改…例如…"): 0/5. It only follows short imperative
   rules, and applies them mechanically.
 - Measured on the user's i5-8500 / 8GB / no GPU: 2B ≈ 0.5–1.9s per sentence, ~1.9GB RAM, load 3–40s (cold disk).
