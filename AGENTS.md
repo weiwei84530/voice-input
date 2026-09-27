@@ -96,6 +96,11 @@ user rules such as term replacement would be blocked by it.
   城市 → 程式 2/2) but applied the example as a blind replacement (台北這個城市 → 程式, 2 of 7 normal sentences damaged)
   and added trailing punctuation; without examples it fixed only 1/5. Neither 2B nor 4B does real context-based
   homophone correction (地符 → diff never fixed). Cost: ~1.9s/sentence vs 0.85s, ~3GB RAM, 88s load on 8GB machine.
+- Small-model benchmark (2026-09-27, 244 real + labelled cases from the user's log): nothing beats
+  Qwen3.5 2B. MiniCPM5 2B/1B, LFM2.5 1.2B and the Chinese correction models (chinese-text-correction 1.5B,
+  ChineseErrorCorrector3 4B) all damage more normal sentences and fix fewer repeats. Four prompt styles moved 2B only
+  between 14–18/44 repeats fixed, so the prompt is not the bottleneck. Homophones by context: 0/25 for every
+  general model. Thinking mode on 2B never finishes (>4096 tokens, ~4 min per sentence).
 - 2B cannot follow descriptive / example-style rules ("請依照語義修改…例如…"): 0/5. It only follows short imperative
   rules, and applies them mechanically.
 - Measured on the user's i5-8500 / 8GB / no GPU: 2B ≈ 0.5–1.9s per sentence, ~1.9GB RAM, load 3–40s (cold disk).
