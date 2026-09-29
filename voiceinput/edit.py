@@ -76,6 +76,8 @@ def plan(selected: str, raw: str, formatted: str) -> Edit:
         return Edit(REPLACE, match_case(word, selected), spelled=True)
     if spoken == _PUNCT.sub("", selected):
         return Edit(REPICK)
+    if spoken in _SYMBOLS and (_ONLY_PUNCT.match(selected) or selected.strip() in _SYMBOLS):
+        return Edit(REPLACE, _SYMBOLS[spoken])    # 。 + 逗號 (no 改成): the LLM returned the context line
     m = _SYMBOL_CHANGE.match(spoken)
     if m:
         src, dst = m.group(1), _SYMBOLS[m.group(2)]
