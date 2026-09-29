@@ -76,6 +76,10 @@ Traditional. Tested 2026-09-29: 7/9 instructions right (politer, 句號改成問
 All LLM work (rank, judge, instruct, rewrite) shows the ring animation; the dots mean ASR only. Commands are matched by fuzzy
 pinyin because ASR hears 選字 as 選自. Terminals are excluded: pasting there inserts at the prompt cursor.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
+Claude Code in Windows Terminal (tested 2026-09-29): its mouse selection is invisible to UIA (always empty), Shift+arrow
+does not select, and a paste goes to the caret instead of replacing the highlight, so voice edits cannot work there.
+UIA does report the text around the caret. Caret-based correction (click after the wrong word, say the right one)
+was proposed and declined by the user; terminals stay plain dictation.
 
 Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency) indexed by fuzzy toneless pinyin, cached in
 DATA_DIR/cache (build ~15s, load ~0.5s). Ranking (`LlmServer.rank`, `prompts/pick.txt`): the model is asked which
