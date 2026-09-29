@@ -43,7 +43,7 @@ Decided 2026-09-29: the app stays light, with a fixed set of sherpa-onnx models 
 
 Qwen3-ASR 0.6B (840MB, ~4.4s per 18s) and Fun-ASR-Nano (1GB, ~7.5s) were selectable before and were removed with the
 picker. As a second opinion Qwen3-ASR gave better alternatives but took ~1.2GB of the user's 8GB machine.
-Memory with everything on: ~0.8GB.
+Memory with everything on: ~1.1GB (was ~3GB with the LLM). The pinyin index held as Python objects is a large part.
 
 ## Text pipeline
 
