@@ -133,6 +133,12 @@ class LlmServer:
         # Guard against the model answering or rambling instead of correcting
         if not out or len(out) > len(text) * 1.5 + 10:
             return text
+        # On very short input (e.g. "Claude") 2B sometimes outputs a rule itself instead of the text
+        echoed = to_traditional(out)
+        for rule in rules.splitlines():
+            rule = rule.strip().strip("。！？.!?")
+            if len(rule) >= 4 and rule in echoed and rule not in text:
+                return text
         return out
 
     def rank(self, before: str, after: str, candidates: list[str]) -> list[tuple[float, str]]:
