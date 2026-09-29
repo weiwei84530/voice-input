@@ -59,6 +59,22 @@ class Picker(QWidget):
             self.adjustSize()
             self._clamp()
 
+    def show_list(self, title: str, words: list[str], rect, timeout_ms: int = 30_000):
+        """A list of choices with its own title (suspected mishearing: 可能聽錯…). rect as in _place; None puts it
+        above the recording indicator."""
+        self.candidates = words
+        self._fill(title, words)
+        self._timer.start(timeout_ms)
+        self._place(rect, bottom=True)
+
+    def physical_rect(self) -> tuple[int, int, int, int]:
+        """(left, top, right, bottom) in physical pixels, for telling clicks on the menu from clicks elsewhere."""
+        screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+        g, r = screen.geometry(), screen.devicePixelRatio()
+        x = g.x() + (self.x() - g.x()) * r
+        y = g.y() + (self.y() - g.y()) * r
+        return int(x), int(y), int(x + self.width() * r), int(y + self.height() * r)
+
     def _fill(self, title: str, candidates: list[str]):
         self.title.setText(title)
         while self.rows.count():
@@ -67,20 +83,26 @@ class Picker(QWidget):
         for i, word in enumerate(candidates):
             self.rows.addWidget(QPushButton(f"{i + 1}　{word}", clicked=lambda _=False, i=i: self._pick(i)))
         self.adjustSize()
-        self._timer.start()
+        self._timer.start(30_000)
 
     def _pick(self, i: int):
         self.hide()
         self.picked.emit(i)
 
-    def _place(self, rect):
-        """rect: selection bounds in physical screen pixels (x, y, w, h) from UI Automation, or None."""
+    def _place(self, rect, bottom: bool = False):
+        """rect: selection bounds in physical screen pixels (x, y, w, h) from UI Automation, or None (then next
+        to the mouse, or with bottom=True above the recording indicator at the bottom of the screen)."""
         if rect:
             x, y, w, h = rect
-            pos = self._to_logical(QPoint(int(x), int(y + h)))
+            pos = self._to_logical(QPoint(int(x), int(y + h))) + QPoint(0, 6)
+        elif bottom:
+            screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+            g = screen.availableGeometry()
+            self.adjustSize()
+            pos = QPoint(g.center().x() - self.sizeHint().width() // 2, g.bottom() - 110 - self.sizeHint().height())
         else:
-            pos = QCursor.pos()
-        self.move(pos + QPoint(0, 6))
+            pos = QCursor.pos() + QPoint(0, 6)
+        self.move(pos)
         self.show()
         self._no_activate()
         self._clamp()

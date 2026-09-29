@@ -30,6 +30,25 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 - Left-click the tray icon to open settings (speech model, models folder, microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
   and shows a per-utterance log (ASR / formatted / LLM) for this session. Changes apply immediately.
 - If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
+- Live captions appear above the indicator while you speak (streaming X-ASR, display only).
+
+## Editing by voice
+
+What you just dictated can be changed without selecting it, as long as you have not pressed a key or clicked since
+(works in terminals too):
+
+| Say | Does |
+|---|---|
+| 城市改成程式 / 不是城市是程式 | replace a word in what you dictated (玉改成教育的育, `cloud 改成 C L A U D E`) |
+| 刪掉城市 / 刪掉上一句 / 全部刪掉 | delete |
+| 復原 | undo the last change |
+| 問號 / 逗號 … | type the symbol (replaces trailing punctuation) |
+| 換行 / 送出 | Shift+Enter / Enter; "…（pause）送出" at the end of a sentence pastes and sends |
+| 不要記 | forget the hotword just learned |
+
+With text selected: 刪除, 選字 (candidate menu), a new word, spelled letters, 教育的育, or an instruction (翻譯成英文).
+After a dictation a small menu may offer a likely misheard word (a second model heard it differently): say 對 or
+第幾個. Corrections are learned as hotwords, including a sentence deleted and said again.
 
 ## Models
 
@@ -63,10 +82,18 @@ voiceinput/
   audio.py     microphone capture
   asr.py       sherpa-onnx recognizers
   llm.py       llama-server lifecycle + custom-rule rewrite
-  textfmt.py   final text formatting
+  textfmt.py   final text formatting (incl. repeated-word removal)
+  session.py   what was just typed at the caret, undo, re-dictation
+  commands.py  voice commands without a selection
+  edit.py      voice edits on a selection
+  suspects.py  second-opinion check for misheard words
+  selection.py selection / on-screen terms via UI Automation
+  hotwords.py  learned corrections; ASR biasing words
+  candidates.py same-sounding words (jieba dictionary)
+  picker.py    candidate / suggestion menu
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log
-  output.py    clipboard paste
+  output.py    clipboard paste, Backspace / Enter
   models.py    ASR model registry + downloader
   paths.py     app folder vs per-user data folder, legacy data migration
   autostart.py launch at login

@@ -57,7 +57,8 @@ clips changed). Fun-ASR-Nano (`max_new_tokens` 512, no total cap exposed) was no
 ### Other candidates seen (not evaluated)
 
 - X-ASR fp32 (non-int8) `sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-2026-06-03`, ~560MB — same model, possibly slightly more accurate.
-- X-ASR streaming variants (`...-160ms/480ms/960ms/1920ms-streaming-...-2026-06-05`) — would allow live partial results.
+- X-ASR streaming variants (`...-160ms/480ms/960ms/1920ms-streaming-...-2026-06-05`) — the 480ms int8 one is now
+  used for live captions only.
 - Nemotron 3.5 ASR streaming 0.6B (multilingual, ~450MB int8) — reported weak on Chinese.
 
 ## Text pipeline
@@ -66,12 +67,17 @@ clips changed). Fun-ASR-Nano (`max_new_tokens` 512, no total cap exposed) was no
 Formatting before the LLM makes it see Traditional Chinese / API / 728, matching how rules are written (tested: rule
 "API → 應用程式介面" failed on raw "A P I" and mangled the sentence, worked after formatting). There is deliberately no
 formatting pass after the LLM: it changed 0 of 25 real LLM outputs, and it would override user rules such as
-"add a trailing period" or "write numbers in Chinese". Order inside `format_text` matters: s2tw → filler removal → 百分之 →
+"add a trailing period" or "write numbers in Chinese". Order inside `format_text` matters: s2tw → filler removal →
+disfluencies → 百分之 →
 numerals → spelled letters → 點 → percent → number+letter → English punctuation → CJK/ASCII spacing → trailing punctuation.
 
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
 - After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台).
 - 嗯 / 呃 are removed by regex (tested as an LLM rule first: it worked but sometimes over-deleted; regex is free and exact).
+- Disfluencies (`remove_disfluencies`, 2026-09-29): repeated 2-4 character chunks (我們我們, 你可不可不可以, 今天今天),
+  restarts (先打開那個，先打開設定頁 → 先打開設定頁) and stutters of a few characters (我我, 先先). ABAB reduplication is
+  kept by jieba POS tag (研究研究, 討論討論 are verbs), as are counting (一個一個), laughter and 好的好的. 在 is not a
+  stutter character (現在在猶豫). Over the ~400 logged utterances every change was a real repeat.
 - Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal,
   percentage or followed by a single letter; multi-character ones become digits (十五 → 15, 七百二十八 → 728).
   Also skipped: `_KEEP_WORDS` (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
@@ -119,10 +125,62 @@ text, value = correction): spelled, Chinese words of 2+ characters with near-ide
 l/n …), or similar Latin spelling. Any selection counts (the "only recent VoiceInput output" rule was dropped on
 2026-09-29 at the user's request). A tray notification offers undo. Hotword modes: "always" replaces blindly;
 "context" (default) replaces only if `rank` prefers the value in that sentence (4B test showed blind 城市 → 程式
-breaks 台北這個城市); without the LLM running, context hotwords are skipped. The LLM runs while custom rules or
-voice edits are enabled.
+breaks 台北這個城市); without the LLM running, context hotwords are skipped. The LLM runs while custom rules,
+voice edits or the second opinion are enabled.
 
-Not built yet: X-ASR native hotword biasing; cross-script corrections (地符 → diff) are neither suggested nor learned.
+Learning was tightened on 2026-09-29: Chinese words must match in every syllable (fuzzy), 4+ character words may differ
+in one (明天見 → 後天見 had been learned from 改成后天见). A one-character fix is learned with its neighbours
+(張雨薇: 雨 → 育 is stored as 張雨薇 → 張育薇), never as a single character. Re-learning an existing identical hotword is
+a no-op (undo once deleted the user's existing 城市 → 程式 because of this).
+
+Not built yet: cross-script corrections (地符 → diff) are neither suggested nor learned.
+
+## Hands-free editing (branch `smart-editing`, 2026-09-29)
+
+Goal from the user: fix text by voice without touching the keyboard or mouse. Built in one pass after a review;
+the user asked to see the whole result and adjust later.
+
+- **Dictated-text buffer (`session.py`)**: the text we pasted is known to sit right before the caret until the user
+  presses a key (keyboard hook, injected keys ignored), clicks (mouse hook; clicks on our menu ignored) or another
+  window comes to the front. Edits to it are Backspace up to the edit point (one `SendInput` burst) + paste of the
+  new tail. Works in terminals too, which UIA selection never could (Claude Code in Windows Terminal: tested with
+  cmd in WT, 23 backspaces + paste, and Enter; Notepad tested the same way).
+- **Voice commands (`commands.py`)**, without a selection: 復原 (undo stack of buffer states; also removes a hotword
+  learned by that step), 不要記, 送出 (Enter), 換行 (Shift+Enter), 刪掉上一句, 全部刪掉, X改成Y / 不是X是Y, 刪掉X,
+  bare symbol names (問號 replaces trailing punctuation). Matched by fuzzy pinyin (ASR wrote 復原 as 复员). X must be
+  found in the buffer (exact, case-insensitive, or same pinyin, so 城市改成城市 heard for 城市改成程式 still finds it
+  and then auto-picks the best homophone); otherwise the utterance is dictated, so "把這個函式改成 async" still reaches
+  Claude Code. A trailing 送出 presses Enter only after a pause: ASR punctuation before it or ≥0.35s gap in X-ASR
+  token times (TTS: 0.64s with a pause); 請把表單送出 is dictated. Enter is sent 150ms after the paste (WT reads the
+  clipboard asynchronously).
+- **Character descriptions** (edit.py): 教育的育, 偉大的偉字, 弓長張 (table of common ones). The character is taken from the
+  describing word by sound because ASR writes 教育的欲. In a longer selection the character that sounds alike is
+  replaced (雨薇 + 教育的育 → 育薇). Works with 改成 too (玉改成教育的育).
+- **Re-dictation learning**: dictation deleted (Backspace/Delete without typing, or 刪掉上一句 / 復原) and re-said within
+  45s → one changed word/phrase is learned (cloud → Claude, 城市 → 程式). Content changes fail `worth_learning`.
+- **X-ASR hotword biasing** (`asr.py`): modified beam search + per-stream hotwords, same speed as greedy (0.11-0.22s
+  on 3s clips). The model's vocab is pure BPE with CJK as "▁X" pieces: `modeling_unit="bpe"`, CJK hotwords
+  space-separated and converted to Simplified, and a `bpe.vocab` exported from `bpe.model` by a tiny protobuf reader
+  (sentencepiece is not installed). One unencodable word makes sherpa-onnx drop the whole list, so words are
+  checked against tokens.txt. Results: L M → LLM, work tree → worktree at 2.0; cloud code → Claude Code needs 3.0
+  (learned Latin values get 3.0); Chinese biasing barely works (張雨薇 → 張玉薇 at 3.0, 城市 never → 程式).
+- **On-screen terms**: at key-down UIA reads the focused control's visible text (0.12s in WT) and English terms bias
+  X-ASR at 1.5: CamelCase / acronyms / digits always, other 5+ letter words if seen twice, dotted names skipped.
+- **Second opinion + suspects** (`suspects.py`): SenseVoice re-decodes each dictation in the background (0.1s);
+  where it differs in Chinese characters, the LLM compares the two versions in context and a small menu offers the
+  alternative if it gets ≥25% (2B leans mainland: 函數 0.71 vs 函式 0.29). 對 / 第幾個 picks, anything else closes.
+  Qwen3-ASR was tried first: better alternatives but ~1.2GB and ~1s; the app reached 1.8GB beside the 2B LLM on
+  the user's 8GB machine. Asking the LLM alone to scan homophones is useless (80 real utterances: every flag was
+  wrong, 就是 → 就勢 0.79), and X-ASR token confidence was dropped for the same reason. Suspects are rare because
+  both models often share an error (主機版, 剪貼布).
+  The second model's version also feeds the 選字 menu when the selection came from a recent dictation.
+- **Live captions**: streaming X-ASR 480ms int8 (aux model `xasr_stream`, 134MB) fed from the recorder callback,
+  shown above the pill; display only, the final text still comes from the selected model.
+- **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
+- Testing without a microphone: `dev/e2e.py` drives the real App with Windows TTS audio (zh-TW Hanhan voice via
+  `dev/tts.ps1`) into a fresh Notepad or Windows Terminal window and reads the result back through UIA. It types
+  into real windows and changes `hotwords.json`; back that up first.
+- Memory with everything on: app ~1.1GB (X-ASR, streaming, SenseVoice, pinyin index) + llama-server ~1.9GB.
 
 ## LLM custom rules
 
@@ -157,7 +215,8 @@ user rules such as term replacement would be blocked by it.
 - Measured on the user's i5-8500 / 8GB / no GPU: 2B ≈ 0.5–1.9s per sentence, ~1.9GB RAM, load 3–40s (cold disk).
 - Prompts are plain text files in `voiceinput/prompts/` with `{{name}}` slots (`llm.render`), re-read on every call
   so they can be read and tweaked without touching code.
-- The server runs while "啟用自訂規則" or voice edits are enabled; the rules box is editable only once it is ready.
+- The server runs while "啟用自訂規則", voice edits or the second opinion are enabled; the rules box is editable only
+  once it is ready.
 - Output longer than 1.5× input (+10) is discarded as a hallucination guard.
 - Warm-up request with the current rules at load keeps the system prompt in the KV cache (first request ~0.5s
   instead of ~4s). Changing the rules makes the next request slow once.

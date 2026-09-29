@@ -20,12 +20,13 @@ from .textfmt import to_traditional
 log = logging.getLogger("voiceinput")
 
 _CACHE = DATA_DIR / "cache" / "pinyin_index.pkl"
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 _CJK = re.compile(r"^[㐀-䶿一-鿿]+$")
 _FUZZY = [("zh", "z"), ("ch", "c"), ("sh", "s"), ("ing", "in"), ("eng", "en"), ("ang", "an")]
 _MIN_FREQ = 3            # jieba's floor; rarer entries are mostly noise
 
 _index: dict[str, list[tuple[str, int]]] | None = None
+_pos: dict[str, str] = {}   # jieba POS tag of 2-4 character words (Simplified), used by textfmt's disfluency pass
 _lock = threading.Lock()
 
 
@@ -45,8 +46,9 @@ def _dict_path() -> Path:
     return Path(spec.submodule_search_locations[0]) / "dict.txt"
 
 
-def _build() -> dict:
+def _build() -> tuple[dict, dict]:
     index: dict[str, list[tuple[str, int]]] = {}
+    pos: dict[str, str] = {}
     with open(_dict_path(), encoding="utf-8") as f:
         for line in f:
             parts = line.split()
@@ -56,29 +58,41 @@ def _build() -> dict:
             if len(word) > 4 or freq < _MIN_FREQ or not _CJK.match(word):
                 continue
             index.setdefault(" ".join(syllables(word)), []).append((word, freq))
+            if len(word) >= 2 and len(parts) > 2:
+                pos[word] = parts[2]
     for words in index.values():
         words.sort(key=lambda wf: -wf[1])
-    return index
+    return index, pos
 
 
 def load() -> dict:
     """The pinyin index, built (and cached) on first use. Safe to call from any thread."""
-    global _index
+    global _index, _pos
     with _lock:
         if _index is None:
             try:
-                version, _index = pickle.loads(_CACHE.read_bytes())
-                if version != _CACHE_VERSION:
-                    _index = None
+                version, index, pos = pickle.loads(_CACHE.read_bytes())
+                if version == _CACHE_VERSION:
+                    _index, _pos = index, pos
             except (OSError, ValueError, pickle.PickleError, EOFError):
-                _index = None
+                pass
             if _index is None:
                 log.info("building pinyin index…")
-                _index = _build()
+                index, pos = _build()
                 _CACHE.parent.mkdir(parents=True, exist_ok=True)
-                _CACHE.write_bytes(pickle.dumps((_CACHE_VERSION, _index)))
+                _CACHE.write_bytes(pickle.dumps((_CACHE_VERSION, index, pos)))
+                _pos, _index = pos, index
                 log.info("pinyin index: %d keys", len(_index))
         return _index
+
+
+def pos_tag(word: str) -> str | None:
+    """jieba POS tag of a Traditional or Simplified word, "" if not a dictionary word, None while the
+    dictionary is still loading (never blocks)."""
+    if _index is None:
+        return None
+    from .textfmt import to_simplified
+    return _pos.get(to_simplified(word), "")
 
 
 def preload() -> None:

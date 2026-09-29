@@ -15,8 +15,8 @@ from .hotkey import HOTKEYS
 
 RULES_HINT = "例如：\n- 「cloud code」一律寫成「Claude Code」\n- 「那個」不要刪"
 RULES_NOTE = "LLM 會逐字照規則執行，例如寫「句尾加句號」，連問句也會被加上句號。規則空白時不會執行 LLM。"
-HOTWORDS_NOTE = ("選取文字後用語音修正（例如選「城市」說「程式」、選「Cloud」拼 C L A U D E），會自動記成熱詞，"
-                 "之後辨識時自動取代。「看上下文」會先用本機 LLM 判斷句子是否適合再取代（LLM 未就緒時不套用）；"
+HOTWORDS_NOTE = ("選取文字後用語音修正（例如選「城市」說「程式」、選「Cloud」拼 C L A U D E）、說「城市改成程式」，"
+                 "或刪掉剛說的話再重講一次，都會自動記成熱詞（說「不要記」可取消），之後辨識時自動取代，英文詞也會用來引導辨識。「看上下文」會先用本機 LLM 判斷句子是否適合再取代（LLM 未就緒時不套用）；"
                  "「永遠取代」一律取代。")
 MODES = [(hotwords.CONTEXT, "看上下文"), (hotwords.ALWAYS, "永遠取代")]
 
@@ -58,6 +58,10 @@ class SettingsDialog(QDialog):
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
         self.edit_enabled = QCheckBox("選取文字後說話 = 編輯選取的文字（刪除、選字、拼字、改字；會啟動本機 LLM）")
+        self.voice_commands = QCheckBox("語音指令：復原、送出、換行、刪掉上一句、「城市改成程式」（改剛剛說的內容）")
+        self.live_caption = QCheckBox("錄音時顯示即時字幕（串流 X-ASR，約 130MB）")
+        self.second_opinion = QCheckBox("背景複查可能聽錯的字（第二個語音模型 SenseVoice + 本機 LLM）")
+        self.screen_terms = QCheckBox("用畫面上的英文詞彙輔助辨識（X-ASR）")
         hotwords_btn = QPushButton("熱詞…", clicked=lambda: self._show_page(1))
         edit_row = QHBoxLayout()
         edit_row.addWidget(self.edit_enabled)
@@ -90,6 +94,10 @@ class SettingsDialog(QDialog):
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
         form.addRow("", edit_row)
+        form.addRow("", self.voice_commands)
+        form.addRow("", self.live_caption)
+        form.addRow("", self.second_opinion)
+        form.addRow("", self.screen_terms)
         llm_row = QHBoxLayout()
         llm_row.addWidget(self.llm_enabled)
         llm_row.addStretch()
@@ -130,7 +138,8 @@ class SettingsDialog(QDialog):
 
         for combo in (self.model, self.mic, self.hotkey):
             combo.currentIndexChanged.connect(self._apply)
-        for box in (self.strip_punct, self.autostart, self.llm_enabled, self.edit_enabled):
+        for box in (self.strip_punct, self.autostart, self.llm_enabled, self.edit_enabled, self.voice_commands,
+                    self.live_caption, self.second_opinion, self.screen_terms):
             box.toggled.connect(self._apply)
 
     def load_values(self):
@@ -146,6 +155,10 @@ class SettingsDialog(QDialog):
         self.autostart.setChecked(self.cfg.autostart)
         self.edit_enabled.setChecked(self.cfg.edit_enabled)
         self.llm_enabled.setChecked(self.cfg.llm_enabled)
+        self.voice_commands.setChecked(self.cfg.voice_commands)
+        self.live_caption.setChecked(self.cfg.live_caption)
+        self.second_opinion.setChecked(self.cfg.second_opinion)
+        self.screen_terms.setChecked(self.cfg.screen_terms)
         self.rules.setPlainText(self.cfg.llm_user_rules)
         self._loading = False
         self._update_rules_enabled()
@@ -198,6 +211,10 @@ class SettingsDialog(QDialog):
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.edit_enabled = self.edit_enabled.isChecked()
         self.cfg.llm_enabled = self.llm_enabled.isChecked()
+        self.cfg.voice_commands = self.voice_commands.isChecked()
+        self.cfg.live_caption = self.live_caption.isChecked()
+        self.cfg.second_opinion = self.second_opinion.isChecked()
+        self.cfg.screen_terms = self.screen_terms.isChecked()
         self.cfg.save()
         self._update_rules_enabled()
         self.applied.emit()

@@ -4,11 +4,16 @@ import re
 import opencc
 
 _s2tw = opencc.OpenCC("s2tw")  # glyphs only; s2twp would also swap vocabulary (程序 -> 程式)
+_t2s = opencc.OpenCC("t2s")
 
 
 def to_traditional(text: str) -> str:
     # s2tw turns 台 into 臺 (台北 -> 臺北); everyday Taiwanese writing uses 台
     return _s2tw.convert(text).replace("臺", "台")
+
+
+def to_simplified(text: str) -> str:
+    return _t2s.convert(text)
 
 CJK = r"㐀-䶿一-鿿"
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4,
@@ -49,6 +54,36 @@ _SPACE_CJK_ASCII = re.compile(f"([{CJK}])\\s*([A-Za-z0-9])")
 _SPACE_ASCII_CJK = re.compile(f"([A-Za-z0-9%])\\s*([{CJK}])")
 _TRAILING_PUNCT = re.compile(r"[。，,.]+$")
 _FILLER = re.compile(r"[嗯呃]+[，,、。]?\s*")
+
+# Disfluencies (2026-09-29, from the user's log: 我們我們明天見, 你可不可不可以, 今天今天, 先打開那個，先打開設定頁).
+# The LLM rule fixed some of these at ~1.4s per sentence; these cover the common shapes for free.
+# Repeated 2-4 character chunks are removed unless they are ABAB reduplication (研究研究, 討論討論: verbs and
+# adjectives by jieba's POS tags), counting (一個一個) or laughter-like (哈哈哈哈).
+_REPEAT = re.compile(rf"([{CJK}]{{2,4}})\1")
+_RESTART = re.compile(rf"([{CJK}]{{3,6}})(?:那個|這個|就是)?[，,、 ]*\1")
+_STUTTER = re.compile(r"([我你他她它就先把這那要會])\1(?!\1)")
+_DISFLUENT = set("還有 就是 然後 那個 這個 所以 因為 但是 如果 我們 你們 他們 我想 我要 你要 應該 可以 今天 明天 "
+                 "現在 其實 反正 不過 而且 可是 我覺得 就是說".split())
+_KEEP_REPEAT = set("好的 對啊 是的 沒錯 謝謝 拜拜".split())
+_ABAB_POS = {"v", "vd", "vn", "vi", "a", "ad", "an", "z"}
+
+
+def _dedupe_repeat(m) -> str:
+    x = m.group(1)
+    if x in _KEEP_REPEAT or len(set(x)) == 1 or x[0] in NUM or x[0] == "每":
+        return m.group(0)
+    if x not in _DISFLUENT:
+        from .candidates import pos_tag   # lazy: candidates imports this module
+        tag = pos_tag(x)
+        if tag is None or tag in _ABAB_POS:   # None: dictionary not loaded yet, keep to be safe
+            return m.group(0)
+    return x
+
+
+def remove_disfluencies(text: str) -> str:
+    text = _RESTART.sub(r"\1", text)
+    text = _REPEAT.sub(_dedupe_repeat, text)
+    return _STUTTER.sub(r"\1", text)
 
 
 def _parse_section(s: str) -> int | None:
@@ -133,6 +168,7 @@ def _percent(m):
 def format_text(text: str, strip_trailing_punct: bool = True) -> str:
     text = to_traditional(text)
     text = _FILLER.sub("", text)
+    text = remove_disfluencies(text)
     text = _PERCENT.sub(_percent, text)
     text = _convert_numbers(text)
     text = _SPELLED.sub(lambda m: m.group(0).replace(" ", "").upper(), text)

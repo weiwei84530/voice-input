@@ -69,6 +69,11 @@ class HotwordStore:
         self.save()
         return h
 
+    def bias_words(self) -> list[tuple[str, float]]:
+        """(word, score) pairs for ASR hotword biasing: the corrected values. Latin terms get a higher score
+        (cloud code -> Claude Code needed 3.0 in testing)."""
+        return [(h.value, 3.0 if _LATIN.match(h.value) else 2.0) for h in self.items if h.value]
+
     def remove(self, h: Hotword):
         if h in self.items:
             self.items.remove(h)
@@ -114,12 +119,14 @@ class HotwordStore:
 
 # --- which edits are worth learning ---
 def sounds_alike(a: str, b: str) -> bool:
-    """Chinese words of 2+ characters whose syllables (fuzzy initials/finals) almost all match: 城市/程式 yes,
-    明天/後天 no. Single characters are never learned (四 -> 是 would rewrite every 四)."""
+    """Chinese words of 2+ characters whose syllables (fuzzy initials/finals) all match: 城市/程式 yes,
+    明天見/後天見 no (it used to allow one different syllable in three and learned that content change).
+    Words of 4+ characters may differ in one syllable. Single characters are never learned (四 -> 是 would
+    rewrite every 四)."""
     if not (_CJK.match(a) and _CJK.match(b)) or len(a) != len(b) or len(a) < 2 or a == b:
         return False
     sa, sb = syllables(a), syllables(b)
-    return sum(x == y for x, y in zip(sa, sb)) >= len(sa) - len(sa) // 3
+    return sum(x != y for x, y in zip(sa, sb)) <= (1 if len(sa) >= 4 else 0)
 
 
 def _edit_distance(a: str, b: str) -> int:

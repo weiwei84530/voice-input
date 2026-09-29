@@ -18,6 +18,10 @@ class Config:
     llm_user_rules: str = ""       # custom rules the LLM applies; empty = LLM is skipped
     edit_enabled: bool = True      # speaking with text selected edits the selection (刪除, spelling, replace)
     models_dir: str = ""           # where ASR / LLM models are stored, "" = paths.DEFAULT_MODELS_DIR
+    voice_commands: bool = True    # 復原 / 送出 / 換行 / 城市改成程式 … on what was just dictated (commands.py)
+    live_caption: bool = True      # streaming X-ASR shows the words while the hotkey is held
+    second_opinion: bool = True    # SenseVoice re-checks each dictation in the background; suspects are offered
+    screen_terms: bool = True      # English terms visible in the focused app bias X-ASR
 
     @classmethod
     def load(cls) -> "Config":

@@ -37,6 +37,7 @@ class Recorder:
         self._stream = None
         self._lock = threading.Lock()
         self.level = 0.0   # latest RMS level, 0..1, read by the overlay
+        self.listener = None   # listener(chunk): also gets each audio chunk (live captions)
 
     def start(self, device_name: str = "") -> None:
         self._chunks = []
@@ -55,6 +56,8 @@ class Recorder:
         mono = indata[:, 0].copy()
         with self._lock:
             self._chunks.append(mono)
+        if self.listener is not None:
+            self.listener(mono)
         rms = float(np.sqrt(np.mean(mono * mono)))
         self.level = min(1.0, rms * 12)
 

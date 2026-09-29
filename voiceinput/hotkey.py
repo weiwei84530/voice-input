@@ -28,9 +28,10 @@ _LLKHF_INJECTED = 0x10
 class PushToTalk:
     """Calls on_press() when the hotkey goes down and on_release(held_seconds) when it goes up."""
 
-    def __init__(self, key_name: str, on_press, on_release):
+    def __init__(self, key_name: str, on_press, on_release, on_other_key=None):
         self.on_press = on_press
         self.on_release = on_release
+        self.on_other_key = on_other_key   # on_other_key(vk): any other key the user pressed (Windows only)
         self._key_name = key_name
         self._down_at = None
         self._listener = None
@@ -57,7 +58,11 @@ class PushToTalk:
 
     # --- Windows: handle everything inside the hook so we can suppress the key ---
     def _win32_filter(self, msg, data):
-        if data.vkCode != _WIN_VK.get(self._key_name) or (data.flags & _LLKHF_INJECTED):
+        if data.flags & _LLKHF_INJECTED:
+            return True
+        if data.vkCode != _WIN_VK.get(self._key_name):
+            if self.on_other_key and msg in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
+                self.on_other_key(data.vkCode)
             return True
         if msg in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
             self._handle_down()

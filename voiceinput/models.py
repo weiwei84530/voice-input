@@ -41,6 +41,17 @@ MODELS = {
 }
 DEFAULT_MODEL = "xasr"
 
+# Not selectable: used alongside the chosen model
+STREAM_MODEL = "xasr_stream"
+AUX_MODELS = {
+    STREAM_MODEL: {   # live captions while recording
+        "short": "X-ASR streaming",
+        "dir": "sherpa-onnx-x-asr-480ms-streaming-zipformer-transducer-zh-en-punct-int8-2026-06-05",
+        "files": ["encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt"],
+    },
+}
+_ALL = {**MODELS, **AUX_MODELS}
+
 
 _models_dir = DEFAULT_MODELS_DIR
 
@@ -68,7 +79,7 @@ def move_models_dir(new: Path) -> None:
     if is_subfolder(new, old):
         raise ValueError("新的模型資料夾不能在目前的模型資料夾裡面")
     new.mkdir(parents=True, exist_ok=True)
-    for name in [m["dir"] for m in MODELS.values()] + [LLM_SUBDIR]:
+    for name in [m["dir"] for m in _ALL.values()] + [LLM_SUBDIR]:
         src, dst = old / name, new / name
         if src.exists() and not dst.exists():
             shutil.move(src, dst)
@@ -76,12 +87,12 @@ def move_models_dir(new: Path) -> None:
 
 
 def model_dir(key: str) -> Path:
-    return _models_dir / MODELS[key]["dir"]
+    return _models_dir / _ALL[key]["dir"]
 
 
 def is_installed(key: str) -> bool:
     d = model_dir(key)
-    return all((d / f).exists() for f in MODELS[key]["files"])
+    return all((d / f).exists() for f in _ALL[key]["files"])
 
 
 def fetch(url: str, dest: Path, progress=None) -> None:
@@ -103,7 +114,7 @@ def download(key: str, progress=None) -> None:
     """Download and extract a model. progress(done_bytes, total_bytes) is optional."""
     if is_installed(key):
         return
-    name = MODELS[key]["dir"] + ".tar.bz2"
+    name = _ALL[key]["dir"] + ".tar.bz2"
     archive = _models_dir / name
     fetch(BASE_URL + name, archive, progress)
     with tarfile.open(archive, "r:bz2") as tar:
@@ -132,6 +143,6 @@ if __name__ == "__main__":
         if is_installed(k):
             print(f"[{k}] already installed")
             continue
-        print(f"[{k}] downloading {MODELS[k]['dir']} ...")
+        print(f"[{k}] downloading {_ALL[k]['dir']} ...")
         download(k, _cli_progress)
         print(f"\n[{k}] done")
