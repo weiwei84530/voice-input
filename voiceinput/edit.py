@@ -29,6 +29,8 @@ _SYMBOLS = {"句號": "。", "句點": "。", "逗號": "，", "問號": "？", 
 _SYM = "|".join(sorted(_SYMBOLS, key=len, reverse=True))
 _SYMBOL_CHANGE = re.compile(rf"^(?:把)?(?:({_SYM}))?(?:都)?(?:改成|換成|變成|改為|換為)(?:標點符號的|標點的|符號的)?({_SYM})$")
 _ONLY_PUNCT = re.compile(r"^[\s，。、！？；：,.!?;:…]+$")
+_END_PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
+_ANY_PUNCT = re.compile(r"[，。、！？；：,.!?;:…]")
 _ORDINALS = "一二三四五六七八九"
 _PICK = re.compile(rf"^(?:選)?第?([{_ORDINALS}兩1-9])(?:個|號)?$")
 
@@ -76,15 +78,17 @@ def plan(selected: str, raw: str, formatted: str) -> Edit:
         return Edit(REPLACE, match_case(word, selected), spelled=True)
     if spoken == _PUNCT.sub("", selected):
         return Edit(REPICK)
-    if spoken in _SYMBOLS and (_ONLY_PUNCT.match(selected) or selected.strip() in _SYMBOLS):
-        return Edit(REPLACE, _SYMBOLS[spoken])    # 。 + 逗號 (no 改成): the LLM returned the context line
     m = _SYMBOL_CHANGE.match(spoken)
-    if m:
-        src, dst = m.group(1), _SYMBOLS[m.group(2)]
-        if src and _SYMBOLS[src] in selected:                      # 句號改成問號: 好。 -> 好？
-            return Edit(REPLACE, selected.replace(_SYMBOLS[src], dst))
-        if _ONLY_PUNCT.match(selected) or selected.strip() in _SYMBOLS:   # 。/ 點點點 + 改成逗號
+    src, dst = (m.group(1), _SYMBOLS[m.group(2)]) if m else (None, _SYMBOLS.get(spoken))
+    if src and _SYMBOLS[src] in selected:                          # 句號改成問號: 好。 -> 好？
+        return Edit(REPLACE, selected.replace(_SYMBOLS[src], dst))
+    if dst and not src:                                            # 逗號 / 改成逗號 (the LLM got these wrong)
+        if _ONLY_PUNCT.match(selected) or selected.strip() in _SYMBOLS:   # 。/ 點點點 -> ，
             return Edit(REPLACE, dst)
+        if _END_PUNCT.search(selected):                                    # 好。 -> 好，
+            return Edit(REPLACE, _END_PUNCT.sub("", selected) + dst)
+        if not _ANY_PUNCT.search(selected):                                # 好 -> 好，
+            return Edit(REPLACE, selected.rstrip() + dst)
     m = _CHANGE_TO.search(spoken)
     if m and worth_learning(selected, m.group(1), False):
         return Edit(REPLACE, m.group(1))       # 改成程式: the 2B model echoes the instruction instead

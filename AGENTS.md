@@ -79,6 +79,10 @@ otherwise any cue word (改, 換, 加上, 去掉, 翻譯, 這句, 一點, 問號
 2B often returns the whole line or Simplified text, so `instruct` strips the surrounding context and converts to
 Traditional. Tested 2026-09-29: 7/9 instructions right (politer, 句號改成問號, 加上請, 翻譯成英文, 後面加驚嘆號 …);
 "改成標點符號的點點點" and "改得正式一點" came back unchanged, which is reported as a failure and leaves the text alone.
+A bare symbol name (逗號) or 改成逗號 is also done in code (2026-09-29; the LLM turned 。 + 逗號 into the context
+line): punctuation-only selection → the symbol, trailing punctuation → replaced (好。 → 好，), no punctuation →
+appended (好 → 好？); punctuation only in the middle still goes to the LLM. `instruct` also rejects output that is
+just the surrounding text echoed back, and non-punctuation output for a punctuation-only selection.
 All LLM work (rank, judge, instruct, rewrite) shows the ring animation; the dots mean ASR only. Commands are matched by fuzzy
 pinyin because ASR hears 選字 as 選自. Terminals are excluded: pasting there inserts at the prompt cursor.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.

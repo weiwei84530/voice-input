@@ -3,6 +3,7 @@ import json
 import math
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -42,6 +43,7 @@ def render(name: str, **slots: str) -> str:
         text = text.replace("{{" + key + "}}", value)
     return text.strip()
 
+_NON_WORD = re.compile(r"[\W_]+")   # punctuation and spaces; CJK counts as word characters
 _THREADS = max(1, (os.cpu_count() or 2) - 1)
 
 
@@ -196,6 +198,13 @@ class LlmServer:
         out = out.strip()
         # Guard: rambling, or the instruction copied into the result instead of carried out
         if not out or len(out) > len(selected) * 4 + 40 or instruction.strip("。！？") in out:
+            return selected
+        # Guard: the surrounding text echoed back instead of the edited selection (。 + 逗號 -> 現在輪到你)
+        core = _NON_WORD.sub("", out)
+        if len(core) >= 2 and core not in _NON_WORD.sub("", selected) and core in _NON_WORD.sub("", before + after):
+            return selected
+        # Guard: a selection of only punctuation must come back as only punctuation
+        if not _NON_WORD.sub("", selected) and core:
             return selected
         return out
 
