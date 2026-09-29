@@ -5,7 +5,7 @@ place of the focused app, so nothing is typed into real windows. Audio comes fro
 
 Each step is a wav name in <dir>/wav (spoken), sel:WORD (select the last WORD in the box), click (the user clicks:
 ends what the app knows about the text), tick (click ✓ in the add-hotword box), pick:N (click row N of an open
-menu, 1-based), keep (click 保留「X」 in a context hotword question), undo (double tap of the hotkey), type:TEXT
+menu, 1-based), pickw:WORD (click the row showing WORD), keep (click 保留「X」 in a context hotword question), undo (double tap of the hotkey), type:TEXT
 (the user replaces the last dictation's copy of its first differing word by hand: type:城市=程式, then the idle
 check runs at once) or key:BACK (the user presses Backspace n times: key:BACK*3).
 It works on a copy of hotwords.json (<dir>/hotwords.test.json), never on the real file.
@@ -121,6 +121,14 @@ try:
                 A.picker._confirm()
             pump(0.3)
             print(f"[點 ✓] {'加入' if shown else '（沒有方塊）'}  熱詞：{[(h.key, h.value) for h in A.hotwords.items]}")
+            continue
+        if step.startswith("pickw:"):
+            w = step[6:]
+            if A.picker.isVisible() and w in A.picker.candidates:
+                A.picker._pick(A.picker.candidates.index(w))
+            pump(0.3)
+            offer = f"   ✓ 框：{A._menu[1:3]}" if A._menu and A._menu[0] == "learn" and A.picker.isVisible() else ""
+            print(f"[點 {w}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{offer}")
             continue
         if step.startswith("pick:") or step == "keep":
             shown = A.picker.isVisible()

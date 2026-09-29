@@ -481,9 +481,18 @@ class App(QObject):
     def _learn(self, old: str, new: str, spelled: bool, source: str = "", context=None):
         """If the edit looks like a correction of a misrecognition, offer old -> new as a hotword in the ✓ box.
         Nothing is added until the user clicks ✓ (decided 2026-09-29)."""
+        old, new = old.strip(), new.strip()
+        undone = self._undone_hotword(old, new)
+        if undone is not None:
+            # a hotword's replacement changed back (程式 -> 城市): not a new correction but a place where
+            # 城市 -> 程式 was wrong, as if 保留 had been clicked; a reverse hotword would fight the original
+            log.info("hotword %s -> %s undone near %s", undone.key, undone.value, context)
+            if context and undone.mode != "always":
+                undone.remember(context, False)
+                self.hotwords.save()
+            return
         if not worth_learning(old, new, spelled):
             return
-        old, new = old.strip(), new.strip()
         known = self.hotwords.find(old)
         if known is not None and known.value == new:
             if context:
@@ -501,6 +510,17 @@ class App(QObject):
         self._menu = ("learn", old, new, context)
         self.picker.show_confirm("加入熱詞？點 ✓ 加入", f"{old} → {new}", caret_rect())
         self.session.ignore_rects = [self.picker.physical_rect()]
+
+    def _undone_hotword(self, old: str, new: str):
+        """The hotword whose value old holds and whose key new puts back (程式 -> 城市 for 城市 -> 程式; also
+        with neighbouring characters: 張育薇 -> 張雨薇), or None."""
+        for h in self.hotwords.items:
+            if not h.key or not h.value:
+                continue
+            i = old.casefold().find(h.value.casefold())
+            if i >= 0 and (old[:i] + h.key + old[i + len(h.value):]).casefold() == new.casefold():
+                return h
+        return None
 
     def on_learn_confirmed(self):
         menu, self._menu = self._menu, None

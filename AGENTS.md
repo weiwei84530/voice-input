@@ -101,7 +101,9 @@ by accident, and ✕ or 15s declines). Offered when: Chinese words of 2+ charact
 4+ characters may differ in one), or similar Latin spelling. A one-character
 fix is learned with its neighbours (張雨薇: 雨 → 育 is stored as 張雨薇 → 張育薇). An existing hotword is never
 overwritten by a different value (picking 乘勢 for 城市 in one sentence must not replace 城市 → 程式); that
-sentence's words become a declined context instead. Offer sources: a replaced selection, a picked suggestion,
+sentence's words become a declined context instead. Changing a hotword's replacement back (程式 → 城市 by 選字,
+re-saying or typing) is never offered as a reverse hotword: the sentence's words go to that hotword's `negatives`,
+as if 保留 had been clicked (a reverse hotword would fight the original). Offer sources: a replaced selection, a picked suggestion,
 a re-dictation, and a hand-made edit (below).
 
 Modes (settings: 一律取代 / 自動判斷): "always" replaces blindly. "context" (default) decides by the words around the key (`context_words`: content
