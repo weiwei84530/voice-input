@@ -23,6 +23,12 @@ _CHANGE_TO = re.compile(r"(?:改成|換成|改為|換為|變成|寫成)(.+)$")
 # an LLM classifier). Re-dictating a sentence that happens to contain one of them is sent to the LLM too.
 _INSTRUCT = re.compile(r"改|換|變成|翻譯|翻成|加上|加個|加一|補上|去掉|拿掉|移除|刪|寫成|寫得|一點|這句|這段|這行|"
                        r"句號|逗號|問號|驚嘆號|頓號|引號|括號|標點|符號|大寫|小寫|語氣|禮貌|正式|口語|簡短|縮短|精簡|潤飾|通順")
+# Punctuation by spoken name. 2B gets these wrong (。 + 改成逗號 -> "，。", 點點點 left as is), so they are done in code.
+_SYMBOLS = {"句號": "。", "句點": "。", "逗號": "，", "問號": "？", "驚嘆號": "！", "感嘆號": "！", "驚歎號": "！",
+            "頓號": "、", "分號": "；", "冒號": "：", "點點點": "……", "刪節號": "……", "省略號": "……"}
+_SYM = "|".join(sorted(_SYMBOLS, key=len, reverse=True))
+_SYMBOL_CHANGE = re.compile(rf"^(?:把)?(?:({_SYM}))?(?:都)?(?:改成|換成|變成|改為|換為)(?:標點符號的|標點的|符號的)?({_SYM})$")
+_ONLY_PUNCT = re.compile(r"^[\s，。、！？；：,.!?;:…]+$")
 _ORDINALS = "一二三四五六七八九"
 _PICK = re.compile(rf"^(?:選)?第?([{_ORDINALS}兩1-9])(?:個|號)?$")
 
@@ -70,6 +76,13 @@ def plan(selected: str, raw: str, formatted: str) -> Edit:
         return Edit(REPLACE, match_case(word, selected), spelled=True)
     if spoken == _PUNCT.sub("", selected):
         return Edit(REPICK)
+    m = _SYMBOL_CHANGE.match(spoken)
+    if m:
+        src, dst = m.group(1), _SYMBOLS[m.group(2)]
+        if src and _SYMBOLS[src] in selected:                      # 句號改成問號: 好。 -> 好？
+            return Edit(REPLACE, selected.replace(_SYMBOLS[src], dst))
+        if _ONLY_PUNCT.match(selected) or selected.strip() in _SYMBOLS:   # 。/ 點點點 + 改成逗號
+            return Edit(REPLACE, dst)
     m = _CHANGE_TO.search(spoken)
     if m and worth_learning(selected, m.group(1), False):
         return Edit(REPLACE, m.group(1))       # 改成程式: the 2B model echoes the instruction instead
