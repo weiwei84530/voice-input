@@ -64,19 +64,31 @@ numerals → spelled letters → 點 → percent → number+letter → English p
 
 Plan agreed 2026-09-27. If text is selected when the hotkey goes down (`selection.py`, UI Automation TextPattern,
 read on a background thread), the utterance edits the selection instead of being pasted as new text (`edit.py`):
-刪除 → Delete key; letters spelled one by one → that word, with the selection's capitalisation (Cloud + C L A U D E →
-Claude); anything else → replaces the selection. Terminals are excluded: pasting there inserts at the prompt cursor.
+刪除 → Delete key; 選字 → candidate menu; letters spelled one by one → that word, with the selection's capitalisation
+(Cloud + C L A U D E → Claude); saying the selected word again → auto-pick the best other candidate; 改成X → X when X
+sounds like the selection (2B echoes "改成程式" back instead of doing it), otherwise sentences with an editing verb
+(翻譯, 改寫, 加上 …) → LLM (`prompts/edit.txt`); anything else → replaces the selection. Commands are matched by fuzzy
+pinyin because ASR hears 選字 as 選自. Terminals are excluded: pasting there inserts at the prompt cursor.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
 
-A replacement is learned as a hotword (`hotwords.json` in DATA_DIR, key = wrong text, value = correction) only if the
-selected text came from a recent VoiceInput result and the edit looks like a correction: spelled, Chinese words of
-2+ characters with near-identical pinyin (fuzzy zh/z, ing/in, l/n …), or similar Latin spelling. A tray
-notification offers undo. Hotword modes: "always" replaces blindly; "context" (default) needs a judge to confirm the
-word fits the sentence (4B test showed blind 城市 → 程式 breaks 台北這個城市).
+Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency) indexed by fuzzy toneless pinyin, cached in
+DATA_DIR/cache (build ~15s, load ~0.5s). Ranking (`LlmServer.rank`, `prompts/pick.txt`): the model is asked which
+option fills the blank and answers with the word; we read first-token probabilities, and candidates sharing a first
+token (選字/選自) are split by a second request with that token prefilled. Asking for a letter (A/B/C) instead was
+strongly position-biased (reversed order flipped 4/8). Tested 2026-09-29: auto-pick 8/9 correct; the judge kept
+台北這個城市 and fixed 修這個城市的 bug. llama-server has no prompt logprobs (`echo` is ignored), so full-sentence
+scoring is not available. The menu (`picker.py`) is a non-activating window below the selection; a click or saying
+第二個 / 二 while it is open pastes that row.
 
-Not built yet (waiting for LLM experiments): candidate generation (pypinyin + word list) ranked by the local LLM,
-the 選字 popup (non-activating window next to the selection), auto-pick when ASR repeats the selected text, the
-context judge, free-form edit instructions via 2B, LLM loading when voice edits are on, X-ASR native hotword biasing.
+Every replacement that looks like a correction is learned as a hotword (`hotwords.json` in DATA_DIR, key = wrong
+text, value = correction): spelled, Chinese words of 2+ characters with near-identical pinyin (fuzzy zh/z, ing/in,
+l/n …), or similar Latin spelling. Any selection counts (the "only recent VoiceInput output" rule was dropped on
+2026-09-29 at the user's request). A tray notification offers undo. Hotword modes: "always" replaces blindly;
+"context" (default) replaces only if `rank` prefers the value in that sentence (4B test showed blind 城市 → 程式
+breaks 台北這個城市); without the LLM running, context hotwords are skipped. The LLM runs while custom rules or
+voice edits are enabled.
+
+Not built yet: X-ASR native hotword biasing; cross-script corrections (地符 → diff) are neither suggested nor learned.
 
 ## LLM custom rules
 
@@ -85,7 +97,7 @@ Design (decided 2026-09-26): the LLM does **no built-in cleanup**. It only appli
 
 Why: with a long built-in cleanup prompt, 2B changed 11 of 65 real utterances and about 6 of those were harmful
 (deleted 我剛剛說 / 二 / 十分, turned 八十 into eighty); it never added quotes or fixed homophones, and it ignored user
-rules. With the short rules-only prompt (`SYSTEM_PROMPT` in `llm.py`) it followed rules (cloud code → Claude Code)
+rules. With the short rules-only prompt (`prompts/rewrite.txt`) it followed rules (cloud code → Claude Code)
 and left unrelated sentences alone. "Add ？ to questions" was tested as a default rule and rejected: it added ？ to
 statements too. A diff-based guard (keep only edits of allowed types) was prototyped and dropped for now because
 user rules such as term replacement would be blocked by it.
@@ -109,7 +121,9 @@ user rules such as term replacement would be blocked by it.
 - 2B cannot follow descriptive / example-style rules ("請依照語義修改…例如…"): 0/5. It only follows short imperative
   rules, and applies them mechanically.
 - Measured on the user's i5-8500 / 8GB / no GPU: 2B ≈ 0.5–1.9s per sentence, ~1.9GB RAM, load 3–40s (cold disk).
-- The server is only running while "啟用自訂規則" is checked; the rules box is editable only once it is ready.
+- Prompts are plain text files in `voiceinput/prompts/` with `{{name}}` slots (`llm.render`), re-read on every call
+  so they can be read and tweaked without touching code.
+- The server runs while "啟用自訂規則" or voice edits are enabled; the rules box is editable only once it is ready.
 - Output longer than 1.5× input (+10) is discarded as a hallucination guard.
 - Warm-up request with the current rules at load keeps the system prompt in the KV cache (first request ~0.5s
   instead of ~4s). Changing the rules makes the next request slow once.

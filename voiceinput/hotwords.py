@@ -11,8 +11,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 
-from pypinyin import Style, lazy_pinyin
-
+from .candidates import syllables
 from .paths import HOTWORDS_PATH
 
 log = logging.getLogger("voiceinput")
@@ -114,26 +113,12 @@ class HotwordStore:
 
 
 # --- which edits are worth learning ---
-_FUZZY = [("zh", "z"), ("ch", "c"), ("sh", "s"), ("ing", "in"), ("eng", "en"), ("ang", "an")]
-
-
-def _syllables(s: str) -> list[str]:
-    out = []
-    for p in lazy_pinyin(s, style=Style.NORMAL):
-        for a, b in _FUZZY:
-            p = p.replace(a, b)
-        if p.startswith("l"):
-            p = "n" + p[1:]
-        out.append(p)
-    return out
-
-
 def sounds_alike(a: str, b: str) -> bool:
     """Chinese words of 2+ characters whose syllables (fuzzy initials/finals) almost all match: 城市/程式 yes,
     明天/後天 no. Single characters are never learned (四 -> 是 would rewrite every 四)."""
     if not (_CJK.match(a) and _CJK.match(b)) or len(a) != len(b) or len(a) < 2 or a == b:
         return False
-    sa, sb = _syllables(a), _syllables(b)
+    sa, sb = syllables(a), syllables(b)
     return sum(x == y for x, y in zip(sa, sb)) >= len(sa) - len(sa) // 3
 
 

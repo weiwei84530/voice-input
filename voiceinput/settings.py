@@ -16,7 +16,7 @@ from .hotkey import HOTKEYS
 RULES_HINT = "例如：\n- 「cloud code」一律寫成「Claude Code」\n- 「那個」不要刪"
 RULES_NOTE = "LLM 會逐字照規則執行，例如寫「句尾加句號」，連問句也會被加上句號。規則空白時不會執行 LLM。"
 HOTWORDS_NOTE = ("選取文字後用語音修正（例如選「城市」說「程式」、選「Cloud」拼 C L A U D E），會自動記成熱詞，"
-                 "之後辨識時自動取代。「看上下文」會先判斷句子是否適合再取代（需要本機 LLM，尚未完成，目前不會套用）；"
+                 "之後辨識時自動取代。「看上下文」會先用本機 LLM 判斷句子是否適合再取代（LLM 未就緒時不套用）；"
                  "「永遠取代」一律取代。")
 MODES = [(hotwords.CONTEXT, "看上下文"), (hotwords.ALWAYS, "永遠取代")]
 
@@ -57,7 +57,7 @@ class SettingsDialog(QDialog):
 
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
-        self.edit_enabled = QCheckBox("選取文字後說話 = 編輯選取的文字（刪除、拼字、改字）")
+        self.edit_enabled = QCheckBox("選取文字後說話 = 編輯選取的文字（刪除、選字、拼字、改字；會啟動本機 LLM）")
         hotwords_btn = QPushButton("熱詞…", clicked=lambda: self._show_page(1))
         edit_row = QHBoxLayout()
         edit_row.addWidget(self.edit_enabled)

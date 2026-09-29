@@ -25,6 +25,7 @@ class Selection:
     before: str       # rest of the line before the selection
     after: str        # rest of the line after the selection
     app: str          # process name, e.g. chrome.exe
+    rect: tuple | None = None   # selection bounds (x, y, w, h) in physical screen pixels
 
 
 def _proc_name(pid: int) -> str:
@@ -80,7 +81,12 @@ def read_selection() -> Selection | None:
         before, after = line.Clone(), line.Clone()
         before.MoveEndpointByRange(_END, sel, _START)
         after.MoveEndpointByRange(_START, sel, _END)
-        return Selection(text, before.GetText(-1), after.GetText(-1).rstrip("\r\n"), app)
+        try:
+            rects = sel.GetBoundingRectangles()
+            rect = tuple(rects[:4]) if rects and len(rects) >= 4 else None
+        except Exception:
+            rect = None
+        return Selection(text, before.GetText(-1), after.GetText(-1).rstrip("\r\n"), app, rect)
     except Exception:
         log.exception("reading the selection failed")
         return None

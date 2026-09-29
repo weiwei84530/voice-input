@@ -1,5 +1,6 @@
 """Optional LLM pass that applies the user's custom rules, served by a local llama.cpp llama-server."""
 import json
+import math
 import os
 import platform
 import socket
@@ -9,6 +10,7 @@ import tarfile
 import time
 import urllib.request
 import zipfile
+from pathlib import Path
 
 from . import models
 from .models import fetch
@@ -26,13 +28,18 @@ LLM_FILE = "Qwen3.5-2B-Q4_K_M.gguf"
 def llm_path():
     return models.models_dir() / models.LLM_SUBDIR / LLM_FILE
 
-# The model only applies the user's rules; all built-in cleanup lives in textfmt.
-# A short prompt matters: longer prompts with built-in rules made the 2B model ignore user rules.
-SYSTEM_PROMPT = """你會收到一段語音輸入的文字。請依照下列規則修改這段文字，規則沒有提到的地方一字不改，原樣輸出。
-不要回答或評論文字內容，只輸出修改後的文字。
+# Prompts live in prompts/*.txt so they are easy to read and tweak; {{name}} slots are filled by render().
+# They are re-read on every call, so an edited file takes effect without restarting.
+# rewrite.txt: the model only applies the user's rules; all built-in cleanup lives in textfmt. A short prompt
+# matters: longer prompts with built-in rules made the 2B model ignore user rules.
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
-規則：
-{rules}"""
+
+def render(name: str, **slots: str) -> str:
+    text = (PROMPTS_DIR / f"{name}.txt").read_text(encoding="utf-8")
+    for key, value in slots.items():
+        text = text.replace("{{" + key + "}}", value)
+    return text.strip()
 
 _THREADS = max(1, (os.cpu_count() or 2) - 1)
 
@@ -108,21 +115,74 @@ class LlmServer:
         self.close()
         raise TimeoutError("llama-server did not become ready")
 
-    def rewrite(self, text: str, rules: str) -> str:
-        body = {
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT.replace("{rules}", rules.strip())},
-                         {"role": "user", "content": text}],
-            "temperature": 0,
-            "max_tokens": len(text) * 2 + 32,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
+    def _chat(self, messages: list, max_tokens: int, top_logprobs: int = 0) -> dict:
+        body = {"messages": messages, "temperature": 0, "max_tokens": max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False}}
+        if top_logprobs:
+            body.update(logprobs=True, top_logprobs=top_logprobs)
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions",
                                      data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=60) as r:
-            out = json.load(r)["choices"][0]["message"]["content"].strip()
+            return json.load(r)["choices"][0]
+
+    def rewrite(self, text: str, rules: str) -> str:
+        messages = [{"role": "system", "content": render("rewrite", rules=rules.strip())},
+                    {"role": "user", "content": text}]
+        out = self._chat(messages, len(text) * 2 + 32)["message"]["content"].strip()
         # Guard against the model answering or rambling instead of correcting
         if not out or len(out) > len(text) * 1.5 + 10:
             return text
+        return out
+
+    def rank(self, before: str, after: str, candidates: list[str]) -> list[tuple[float, str]]:
+        """Score which candidate best fills the blank in before＿＿after, best first.
+
+        The model answers with the word itself and we read the probabilities of its first token. Asking for a
+        letter (A/B/C) instead was strongly position-biased: reversing the option order flipped 4 of 8 answers.
+        Candidates sharing a first token (選字 / 選自) are split by a second request that prefills that token.
+        """
+        prompt = render("pick", sentence=f"{before}＿＿{after}", options="、".join(candidates))
+        scores = dict.fromkeys(candidates, 0.0)
+        self._split([{"role": "user", "content": prompt}], "", candidates, 1.0, scores, depth=0)
+        return sorted(((p, c) for c, p in scores.items()), key=lambda pc: -pc[0])
+
+    def _split(self, messages, prefix, group, mass, scores, depth):
+        """Share mass among the candidates in group (all starting with prefix) by the next-token probabilities."""
+        msgs = messages + ([{"role": "assistant", "content": prefix}] if prefix else [])
+        tops = self._chat(msgs, 1, top_logprobs=20)["logprobs"]["content"][0]["top_logprobs"]
+        got = dict.fromkeys(group, 0.0)
+        subgroups: dict[str, float] = {}
+        for t in tops:
+            tok = t["token"] if prefix else t["token"].lstrip()
+            p = math.exp(t["logprob"])
+            match = [c for c in group if tok and c[len(prefix):].startswith(tok)]
+            if len(match) == 1:
+                got[match[0]] += p
+            elif len(match) > 1:
+                subgroups[tok] = subgroups.get(tok, 0.0) + p
+        finished = [c for c in group if c == prefix]   # candidate fully spelled out already
+        total = sum(got.values()) + sum(subgroups.values())
+        for c in finished:
+            got[c] += max(0.0, 1.0 - total) / len(finished)
+            total = 1.0
+        norm = total or 1.0
+        for c, p in got.items():
+            scores[c] += mass * p / norm
+        for tok, p in subgroups.items():
+            sub = [c for c in group if c[len(prefix):].startswith(tok)]
+            if depth < 2 and mass * p / norm > 0.02:
+                self._split(messages, prefix + tok, sub, mass * p / norm, scores, depth + 1)
+            else:
+                for c in sub:
+                    scores[c] += mass * p / norm / len(sub)
+
+    def instruct(self, before: str, selected: str, after: str, instruction: str) -> str:
+        """Rewrite the selected text as the spoken instruction asks (e.g. 翻譯成英文). Returns selected on failure."""
+        prompt = render("edit", before=before, selected=selected, after=after, instruction=instruction)
+        out = self._chat([{"role": "user", "content": prompt}], len(selected) * 3 + 48)["message"]["content"]
+        out = out.strip().strip("【】「」\"")
+        if not out or len(out) > len(selected) * 4 + 40:
+            return selected
         return out
 
     def close(self):

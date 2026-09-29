@@ -11,7 +11,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, edit, llm, models, paths
+from . import autostart, candidates, edit, llm, models, paths
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -19,6 +19,7 @@ from .hotkey import TAP_THRESHOLD, PushToTalk
 from .hotwords import HotwordStore, worth_learning
 from .output import paste_text, press_delete
 from .overlay import Overlay
+from .picker import Picker
 from .selection import SelectionProbe
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -48,7 +49,9 @@ class App(QObject):
     pressed = Signal()
     released = Signal(float)
     transcribed = Signal(str)
-    edited = Signal(object, object)   # Selection, edit.Edit: a voice edit on selected text
+    edited = Signal(object, object, str)   # Selection, edit.Edit, log text: a voice edit on selected text
+    candidates_ready = Signal(object, list)  # Selection, ranked candidates for the 選字 menu
+    menu_voice = Signal(int)                 # row picked by voice (-1 = close the menu)
     rewriting = Signal()
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
@@ -73,14 +76,17 @@ class App(QObject):
         self._llm_gen = 0                       # bumps on every enable/disable; stale loads discard themselves
         self._llm_lock = threading.Lock()       # serializes LLM downloads / server starts
         self.hotwords = HotwordStore()
-        self._recent = deque(maxlen=30)         # recent pasted results; only these are learned from
         self._probe: SelectionProbe | None = None
+        self._menu_open = False
+        self._menu_sel = None                   # Selection the 選字 menu belongs to
         self._undo = None                       # hotword the last "learned" notification can undo
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self.overlay = Overlay(lambda: self.recorder.level)
+        self.picker = Picker()
+        self.picker.picked.connect(self.on_menu_pick)
         self.settings = SettingsDialog(self.cfg, self.hotwords)
         self.settings.applied.connect(self.apply_settings)
         self.settings.models_dir_chosen.connect(self.change_models_dir)
@@ -100,6 +106,8 @@ class App(QObject):
         self.released.connect(self.on_release)
         self.transcribed.connect(self.on_transcribed)
         self.edited.connect(self.on_edited)
+        self.candidates_ready.connect(self.on_candidates)
+        self.menu_voice.connect(self.on_menu_voice)
         self.rewriting.connect(self.overlay.show_rewriting)
         self.status.connect(self.on_status)
         self.llm_status.connect(self.on_llm_status)
@@ -110,6 +118,8 @@ class App(QObject):
         self.ptt.start()
         self.load_model(self.cfg.model if self.cfg.model in models.MODELS else models.DEFAULT_MODEL)
         self.load_llm()
+        if self.cfg.edit_enabled:
+            candidates.preload()
         if self.cfg.autostart:
             self._set_autostart()   # re-register so the entry follows the app if its folder was moved
 
@@ -177,8 +187,9 @@ class App(QObject):
         self.models_moved.emit()
 
     def load_llm(self):
-        """Start or stop the LLM server to match cfg.llm_enabled (the model is only loaded while enabled)."""
-        wanted = self.cfg.llm_enabled
+        """Start or stop the LLM server: it runs while custom rules or voice edits are on (candidate ranking,
+        context hotwords and spoken edit instructions need it)."""
+        wanted = self.cfg.llm_enabled or self.cfg.edit_enabled
         if wanted == self._llm_wanted:
             return
         self._llm_wanted = wanted
@@ -227,6 +238,7 @@ class App(QObject):
             return
         self.recording = True
         self._probe = SelectionProbe() if self.cfg.edit_enabled else None
+        self._menu_open = self.picker.isVisible()
         self.tray.setIcon(self.icon_rec)
         self.overlay.show_recording()
 
@@ -240,9 +252,9 @@ class App(QObject):
             self.overlay.hide_overlay()
             return
         self.overlay.show_thinking()
-        self.worker.submit(self._transcribe_job, self.recognizer, audio, self._probe)
+        self.worker.submit(self._transcribe_job, self.recognizer, audio, self._probe, self._menu_open)
 
-    def _transcribe_job(self, rec, audio, probe):
+    def _transcribe_job(self, rec, audio, probe, menu_open):
         stamp = time.strftime("%H:%M:%S")
         try:
             t0 = time.monotonic()
@@ -253,16 +265,20 @@ class App(QObject):
             # Format before the LLM so it sees Traditional Chinese, joined letters and digits, matching how the
             # user writes rules. No formatting after it: that would override rules such as "add a trailing period".
             raw = text
-            text = self.hotwords.apply(format_text(text, self.cfg.strip_trailing_punct))
+            text = self.hotwords.apply(format_text(text, self.cfg.strip_trailing_punct), self._judge)
             entry["fmt"] = text
+            if menu_open:
+                row = edit.parse_pick(text)
+                self.menu_voice.emit(row)
+                if row >= 0:
+                    entry.update(llm=None, edit=f"選第 {row + 1} 個")
+                    self.record.emit(entry)
+                    self.transcribed.emit("")
+                    return
             sel = probe.result() if probe else None
             if sel is not None:
-                ed = edit.plan(sel.text, raw, text)
                 entry["llm"] = None
-                entry["edit"] = _describe(sel.text, ed)
-                log.info("edit on %s: %s", sel.app, entry["edit"])
-                self.record.emit(entry)
-                self.edited.emit(sel, ed)
+                self._edit_job(sel, raw, text, entry)
                 return
             server, rules = self.llm, self.cfg.llm_user_rules.strip()
             if not self.cfg.llm_enabled:
@@ -290,36 +306,110 @@ class App(QObject):
             text = ""
         self.transcribed.emit(text)
 
+    def _judge(self, text: str, start: int, end: int, value: str) -> bool:
+        """Context hotwords: replace only if the LLM prefers value over the recognised word in this sentence."""
+        server = self.llm
+        if server is None:
+            return False
+        ranked = server.rank(text[:start], text[end:], [text[start:end], value])
+        log.info("hotword judge %s|%s: %s", text[start:end], value, [(c, round(p, 2)) for p, c in ranked])
+        return ranked[0][1] == value
+
+    def _ranked(self, sel) -> list[str]:
+        """Same-sounding words for the selection, best fit for its line first (frequency order without the LLM)."""
+        words = candidates.homophones(sel.text)
+        server = self.llm
+        if server is None or not words:
+            return words
+        t0 = time.monotonic()
+        ranked = server.rank(sel.before, sel.after, [sel.text] + words)
+        log.info("rank %.2fs %s: %s", time.monotonic() - t0, sel.text, [(c, round(p, 2)) for p, c in ranked])
+        return [c for _, c in ranked if c != sel.text]
+
+    def _edit_job(self, sel, raw: str, text: str, entry: dict):
+        """Worker thread: turn the utterance into an edit of the selection, using the LLM where needed."""
+        ed = edit.plan(sel.text, raw, text)
+        note = _describe(sel.text, ed)
+        try:
+            if ed.action == edit.REPICK:
+                words = self._ranked(sel)
+                if words and self.llm is not None:
+                    ed = edit.Edit(edit.REPLACE, words[0])
+                    note = f"{sel.text} → {words[0]}（自動挑選）"
+                elif words:
+                    ed = edit.Edit(edit.CANDIDATES)
+                    note = f"選字「{sel.text}」（LLM 未就緒，改開選單）"
+                else:
+                    note = f"「{sel.text}」沒有同音候選"
+            elif ed.action == edit.INSTRUCT:
+                if self.llm is None:
+                    note = f"「{ed.text}」需要 LLM，但尚未就緒"
+                    ed = edit.Edit(edit.REPICK)
+                else:
+                    self.rewriting.emit()
+                    t0 = time.monotonic()
+                    out = self.llm.instruct(sel.before, sel.text, sel.after, ed.text)
+                    entry.update(llm=out, llm_s=time.monotonic() - t0)
+                    note = f"{sel.text} → {out}（指令：{ed.text}）"
+                    ed = edit.Edit(edit.REPLACE, out) if out != sel.text else edit.Edit(edit.REPICK)
+        except Exception as e:
+            log.exception("edit failed")
+            note = f"失敗：{e}"
+            ed = edit.Edit(edit.REPICK)
+        entry["edit"] = note
+        log.info("edit on %s: %s", sel.app, note)
+        self.record.emit(entry)
+        self.edited.emit(sel, ed, note)
+        if ed.action == edit.CANDIDATES:
+            try:
+                words = self._ranked(sel)
+            except Exception:
+                log.exception("ranking candidates failed")
+                words = candidates.homophones(sel.text)
+            self.candidates_ready.emit(sel, words)
+
     def on_transcribed(self, text: str):
         self.overlay.hide_overlay()
         log.info("result: %s", text)
-        if text:
-            self._recent.append(text)
         paste_text(text)
 
-    def on_edited(self, sel, ed):
+    def on_edited(self, sel, ed, note: str):
         self.overlay.hide_overlay()
         self._undo = None   # a click on any newer notification must not undo an older hotword
         if ed.action == edit.DELETE:
             press_delete()
         elif ed.action == edit.REPLACE:
             paste_text(ed.text)
-            self._learn(sel.text, ed)
+            self._learn(sel.text, ed.text, ed.spelled)
         elif ed.action == edit.CANDIDATES:
-            self.tray.showMessage("VoiceInput", "選字選單尚未完成", self.icon_idle, 2000)
+            self._menu_sel = sel
+            self.picker.show_loading(sel.text, sel.rect)
         else:
-            self.tray.showMessage("VoiceInput", f"辨識結果和選取的文字相同：{ed.text or '（沒有文字）'}",
-                                  self.icon_idle, 2000)
+            self.tray.showMessage("VoiceInput", note, self.icon_idle, 2500)
 
-    def _learn(self, old: str, ed):
-        """Record old -> new as a hotword if old came from a recent result and the edit looks like a correction."""
-        i = next((i for i in range(len(self._recent) - 1, -1, -1) if old in self._recent[i]), None)
-        if i is None:
+    def on_candidates(self, sel, words: list):
+        if sel is self._menu_sel and self.picker.isVisible():
+            self.picker.show_candidates(sel.text, words)
+
+    def on_menu_pick(self, row: int):
+        sel, words = self._menu_sel, self.picker.candidates
+        if sel is None or not 0 <= row < len(words):
             return
-        self._recent[i] = self._recent[i].replace(old, ed.text, 1)
-        if not worth_learning(old, ed.text, ed.spelled):
+        self._menu_sel = None
+        log.info("menu pick: %s -> %s", sel.text, words[row])
+        paste_text(words[row])
+        self._learn(sel.text, words[row], False)
+
+    def on_menu_voice(self, row: int):
+        self.picker.hide()     # a number picks a row; anything else closes the menu and is handled normally
+        if row >= 0:
+            self.on_menu_pick(row)
+
+    def _learn(self, old: str, new: str, spelled: bool):
+        """Record old -> new as a hotword if the edit looks like a correction of a misrecognition."""
+        if not worth_learning(old, new, spelled):
             return
-        h = self.hotwords.add(old.strip(), ed.text.strip())
+        h = self.hotwords.add(old.strip(), new.strip())
         log.info("learned hotword: %s -> %s", h.key, h.value)
         self._undo = h
         self.settings.refresh_hotwords()
