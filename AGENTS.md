@@ -29,10 +29,16 @@ Benchmarks: 18s zh/en test audio, CPU, `num_threads = min(4, cpu_count // 2)`.
 |---|---|---|---|---|
 | X-ASR (default) | `sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03` | 130MB | ~0.75s | Punctuation, good English |
 | SenseVoice Small | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17` | 155MB | ~0.8s | Punctuation, numbers as digits (ITN), weaker English; emits tags like `<\|zh\|><\|NEUTRAL\|>` that must be stripped |
-| Qwen3-ASR 0.6B | `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25` | 840MB | ~4.4s | Most accurate |
+| Qwen3-ASR 0.6B | `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25` | 840MB | ~4.4s | Most accurate; 512-token limit, long audio is chunked (below) |
 | Fun-ASR-Nano | `sherpa-onnx-funasr-nano-fp16-2025-12-30` | 1GB | ~7.5s | The int8 build returns empty output on some CPUs; use fp16 `llm` |
 
 Download URL: `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/<dir>.tar.bz2`
+
+Qwen3-ASR long audio (fixed 2026-09-29): prompt + audio (~13 tokens/s) + output is capped at 512 tokens by the
+model, and `max_new_tokens` defaults to 128. A 39s utterance came back as just "language". `asr._split` cuts audio
+over 25s at the quietest 0.4s between 10–25s into the rest; `max_new_tokens` is 160. The model ends each chunk
+with 。 even mid-sentence (又會。以), so a trailing 。 is dropped at joins. Short audio is untouched (0 of 50 real
+clips changed). Fun-ASR-Nano (`max_new_tokens` 512, no total cap exposed) was not checked: model not installed.
 
 ### Other candidates seen (not evaluated)
 
