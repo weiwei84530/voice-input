@@ -85,14 +85,16 @@ The menu (`picker.py`) is a non-activating window below the selection; a click o
 
 ## Hotwords
 
-Every replacement that looks like a correction is learned (`hotwords.json` in DATA_DIR, key = wrong text,
-value = correction): spelled, Chinese words of 2+ characters whose syllables all match (fuzzy zh/z, ing/in, l/n …;
+Every replacement that looks like a correction is offered as a hotword (`hotwords.json` in DATA_DIR, key = wrong
+text, value = correction) in a small box with a ✓ button; it is added only when the user clicks ✓ (decided
+2026-09-29, replacing "add, then offer undo"; speech never answers this box so the next utterance cannot confirm it
+by accident, and ✕ or 15s declines). Offered when: spelled, Chinese words of 2+ characters whose syllables all match (fuzzy zh/z, ing/in, l/n …;
 4+ characters may differ in one; 明天見 → 後天見 was once learned from 改成后天见), or similar Latin spelling. A one-character
 fix is learned with its neighbours (張雨薇: 雨 → 育 is stored as 張雨薇 → 張育薇). An existing hotword is never
-overwritten by a different value (picking 乘勢 for 城市 in one sentence must not replace 城市 → 程式). A tray
-notification offers undo, as does saying 不要記.
+overwritten by a different value (picking 乘勢 for 城市 in one sentence must not replace 城市 → 程式); that
+sentence's words become a declined context instead. Saying 不要記 removes the hotword last added with ✓.
 
-Modes: "always" replaces blindly. "context" (default) decides by the words around the key (`context_words`: content
+Modes (settings: 一律取代 / 自動判斷): "always" replaces blindly. "context" (default) decides by the words around the key (`context_words`: content
 words within 6 characters, function words dropped). Each hotword keeps the words seen where the value was right
 (`contexts`: the sentence it was learned in, and every 對) and where it was wrong (`negatives`: every 不用). A declined
 word wins, then a confirmed one; with neither the key is left as spoken and the menu asks 「城市」要換成「程式」嗎. So
@@ -117,7 +119,7 @@ Goal from the user: fix text by voice without touching the keyboard or mouse.
   describing word by sound because ASR writes 教育的欲. In a longer word the character that sounds alike is replaced
   (雨薇 + 教育的育 → 育薇). Works with 改成 too (玉改成教育的育).
 - **Re-dictation learning**: dictation deleted (Backspace/Delete without typing, or 刪掉上一句 / 復原) and re-said within
-  45s → one changed word/phrase is learned (cloud → Claude, 城市 → 程式). Content changes fail `worth_learning`.
+  45s → one changed word/phrase is offered (✓ box) (cloud → Claude, 城市 → 程式). Content changes fail `worth_learning`.
 - **X-ASR hotword biasing** (`asr.py`): modified beam search + per-stream hotwords, same speed as greedy (0.11-0.22s
   on 3s clips). The model's vocab is pure BPE with CJK as "▁X" pieces: `modeling_unit="bpe"`, CJK hotwords
   space-separated and converted to Simplified, and a `bpe.vocab` exported from `bpe.model` by a tiny protobuf reader
@@ -134,6 +136,8 @@ Goal from the user: fix text by voice without touching the keyboard or mouse.
 - **Live captions**: the streaming model is fed from the recorder callback and shown above the pill.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
 - Tests without a microphone, with Windows TTS audio (zh-TW Hanhan voice via `dev/tts.ps1`):
-  `dev/headless.py` runs the real App against a simulated text box and restores `hotwords.json`; use it by default.
+  `dev/headless.py` runs the real App against a simulated text box with a private copy of `hotwords.json`; use it
+  by default. (An earlier version restored the real file at the end while the user's VoiceInput was running and
+  writing to it: never share the real file with a test.)
   `dev/e2e.py` types into a real Notepad / Windows Terminal window: only when the user is away from the machine
   (Win11 Notepad opens new windows as tabs, and a run once typed into the user's own Notepad document).

@@ -1,5 +1,7 @@
-"""IME-style candidate menu shown next to the selection (選字). It never takes focus, so the target app keeps
-its selection and a click (or saying 第二個) pastes the choice straight over it."""
+"""Small dark menu that never takes focus, so the target app keeps its caret and selection.
+
+Two uses: a list of choices (選字 candidates, a suspected mishearing, a context hotword question), picked by a click
+or by saying 第二個 / 對; and a yes/no box asking whether to add a hotword, answered only with the mouse (✓)."""
 import sys
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
@@ -8,16 +10,21 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 _STYLE = """
 QWidget#picker { background: #202024; border: 1px solid #3a3a40; border-radius: 8px; }
-QLabel { color: #9a9aa2; padding: 2px 4px; }
+QLabel { color: #9a9aa2; padding: 2px 4px; font-size: 12px; }
+QLabel#text { color: #f2f2f2; font-size: 14px; }
 QPushButton { color: #f2f2f2; background: transparent; border: none; border-radius: 5px;
-              padding: 5px 10px; text-align: left; font-size: 15px; }
+              padding: 4px 10px; text-align: left; font-size: 15px; }
 QPushButton:hover { background: #3a3a44; }
-QPushButton#close { color: #9a9aa2; padding: 2px 6px; font-size: 13px; }
+QPushButton#close { color: #9a9aa2; padding: 2px 6px; font-size: 12px; }
+QPushButton#tick { color: #7fd6a4; font-size: 16px; font-weight: bold; padding: 2px 10px; text-align: center; }
+QPushButton#tick:hover { background: #2c4a3a; }
 """
+_MAX_WIDTH = 360
 
 
 class Picker(QWidget):
     picked = Signal(int)      # 0-based row
+    confirmed = Signal()      # ✓ clicked in a yes/no box
 
     def __init__(self):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -25,20 +32,23 @@ class Picker(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.candidates: list[str] = []
+        self.voice_pickable = False   # False for the yes/no box: speech never answers it
         self._timer = QTimer(self, singleShot=True, interval=30_000, timeout=self.hide)
 
         self.frame = QWidget(self, objectName="picker")
         self.frame.setStyleSheet(_STYLE)
+        self.frame.setMaximumWidth(_MAX_WIDTH)
         self.title = QLabel()
         close = QPushButton("✕", objectName="close", clicked=self.hide)
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.addWidget(self.title, 1)
-        head.addWidget(close)
+        head.addWidget(close, 0, Qt.AlignTop)
         self.rows = QVBoxLayout()
         self.rows.setSpacing(0)
         inner = QVBoxLayout(self.frame)
         inner.setContentsMargins(6, 4, 6, 6)
+        inner.setSpacing(2)
         inner.addLayout(head)
         inner.addLayout(self.rows)
         outer = QVBoxLayout(self)
@@ -51,19 +61,30 @@ class Picker(QWidget):
 
     def show_candidates(self, word: str, candidates: list[str]):
         self.candidates = candidates
-        if candidates:
-            self._fill(f"選字：{word}　點選或說「第幾個」", candidates)
-        else:
-            self._fill(f"選字：{word}　找不到同音的候選", [])
+        self._fill(f"選字：{word}　點選或說第幾個" if candidates else f"選字：{word}　找不到同音的候選", candidates)
         if self.isVisible():
-            self.adjustSize()
             self._clamp()
 
     def show_list(self, title: str, words: list[str], rect, timeout_ms: int = 30_000):
-        """A list of choices with its own title (suspected mishearing: 可能聽錯…). rect as in _place; None puts it
-        above the recording indicator."""
+        """A list of choices with its own title. rect as in _place; None puts it above the recording indicator."""
         self.candidates = words
         self._fill(title, words)
+        self._timer.start(timeout_ms)
+        self._place(rect, bottom=True)
+
+    def show_confirm(self, title: str, text: str, rect, timeout_ms: int = 15_000):
+        """A yes/no box: title, text and a ✓ button. Only a click on ✓ confirms; ✕ or the timeout declines."""
+        self.candidates = []
+        self._clear()
+        self.title.setText(title)
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(4, 0, 0, 0)
+        h.addWidget(QLabel(text, objectName="text"), 1)
+        h.addWidget(QPushButton("✓", objectName="tick", clicked=self._confirm))
+        self.rows.addWidget(row)
+        self._shrink()
+        self.voice_pickable = False
         self._timer.start(timeout_ms)
         self._place(rect, bottom=True)
 
@@ -75,19 +96,34 @@ class Picker(QWidget):
         y = g.y() + (self.y() - g.y()) * r
         return int(x), int(y), int(x + self.width() * r), int(y + self.height() * r)
 
-    def _fill(self, title: str, candidates: list[str]):
-        self.title.setText(title)
+    def _clear(self):
         while self.rows.count():
             w = self.rows.takeAt(0).widget()
+            w.hide()               # removed now, not at deleteLater: the old rows kept the window large
+            w.setParent(None)
             w.deleteLater()
+
+    def _shrink(self):
+        self.frame.layout().activate()
+        self.layout().activate()
+        self.resize(self.sizeHint())
+
+    def _fill(self, title: str, candidates: list[str]):
+        self._clear()
+        self.title.setText(title)
         for i, word in enumerate(candidates):
             self.rows.addWidget(QPushButton(f"{i + 1}　{word}", clicked=lambda _=False, i=i: self._pick(i)))
-        self.adjustSize()
+        self.voice_pickable = True
+        self._shrink()
         self._timer.start(30_000)
 
     def _pick(self, i: int):
         self.hide()
         self.picked.emit(i)
+
+    def _confirm(self):
+        self.hide()
+        self.confirmed.emit()
 
     def _place(self, rect, bottom: bool = False):
         """rect: selection bounds in physical screen pixels (x, y, w, h) from UI Automation, or None (then next
@@ -98,8 +134,7 @@ class Picker(QWidget):
         elif bottom:
             screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
             g = screen.availableGeometry()
-            self.adjustSize()
-            pos = QPoint(g.center().x() - self.sizeHint().width() // 2, g.bottom() - 110 - self.sizeHint().height())
+            pos = QPoint(g.center().x() - self.width() // 2, g.bottom() - 110 - self.height())
         else:
             pos = QCursor.pos() + QPoint(0, 6)
         self.move(pos)

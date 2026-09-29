@@ -4,8 +4,8 @@ place of the focused app, so nothing is typed into real windows. Audio comes fro
   .venv\Scripts\python.exe dev\headless.py <dir> step,step,...
 
 Each step is a wav name in <dir>/wav (spoken), sel:WORD (select the last WORD in the box), click (the user clicks:
-ends what the app knows about the text) or key:BACK (the user presses Backspace n times: key:BACK*3).
-hotwords.json is backed up and restored.
+ends what the app knows about the text), tick (click ✓ in the add-hotword box) or key:BACK (the user presses Backspace n times: key:BACK*3).
+It works on a copy of hotwords.json (<dir>/hotwords.test.json), never on the real file.
 """
 import shutil
 import sys
@@ -77,7 +77,11 @@ class Probe:
 
 
 appmod.ContextProbe = Probe
-backup = paths.HOTWORDS_PATH.read_bytes() if paths.HOTWORDS_PATH.exists() else None
+# A private copy of hotwords.json: the real one may be in use by a running VoiceInput at the same time
+_hotwords = Path(S) / "hotwords.test.json"
+_hotwords.write_bytes(paths.HOTWORDS_PATH.read_bytes() if paths.HOTWORDS_PATH.exists() else b"[]")
+_Store = appmod.HotwordStore
+appmod.HotwordStore = lambda: _Store(_hotwords)
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 A = appmod.App(qapp)
@@ -109,6 +113,13 @@ try:
             A.session.on_click(0, 0)
             print(f"[選取 {w}]")
             continue
+        if step == "tick":
+            shown = A.picker.isVisible() and not A.picker.voice_pickable
+            if shown:
+                A.picker._confirm()
+            pump(0.3)
+            print(f"[點 ✓] {'加入' if shown else '（沒有方塊）'}  熱詞：{[(h.key, h.value) for h in A.hotwords.items]}")
+            continue
         if step == "click":
             A.session.on_click(0, 0)
             print("[點滑鼠]")
@@ -128,6 +139,4 @@ try:
         print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}{menu}")
 finally:
     A.quit()
-    if backup is not None:
-        paths.HOTWORDS_PATH.write_bytes(backup)
     shutil.rmtree(Path(S) / "__pycache__", ignore_errors=True)

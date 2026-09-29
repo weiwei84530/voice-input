@@ -50,7 +50,7 @@ What you just dictated can be changed without selecting it, as long as you have 
 With text selected: 刪除, 選字 (candidate menu), a new word, 改成X, spelled letters, 教育的育, 大寫 / 小寫, or a
 punctuation name.
 After a dictation a small menu may offer a likely misheard word (a second model heard it differently), or ask whether
-a learned correction applies here (「城市」要換成「程式」嗎): say 對, 第幾個 or 不用. Corrections are learned as hotwords,
+a learned correction applies here (「城市」要換成「程式」嗎): say 對, 第幾個 or 不用. Corrections are offered as hotwords (click ✓ to add),
 including a sentence deleted and said again; a hotword remembers the words around it to decide next time.
 
 ## Models

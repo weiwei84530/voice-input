@@ -14,10 +14,10 @@ from .models import is_subfolder
 from .hotkey import HOTKEYS
 
 HOTWORDS_NOTE = ("選取文字後用語音修正（例如選「城市」說「程式」、選「Cloud」拼 C L A U D E）、說「城市改成程式」，"
-                 "或刪掉剛說的話再重講一次，都會自動記成熱詞（說「不要記」可取消），之後辨識時自動取代，英文詞也會用來引導辨識。"
-                 "「看上下文」依修正時前後的詞決定要不要換；沒把握時會跳出「可能是…？」讓你說「對」或「不用」，之後同樣語境就不再問。"
-                 "「永遠取代」一律取代。")
-MODES = [(hotwords.CONTEXT, "看上下文"), (hotwords.ALWAYS, "永遠取代")]
+                 "或刪掉剛說的話再重講一次，會跳出小方塊詢問是否加入熱詞，點 ✓ 才會加入。加入後辨識時自動取代，英文詞也會用來引導辨識。"
+                 "「自動判斷」依前後的詞決定要不要換；沒把握時會跳出小方塊，說「對」換掉、「不用」保留，之後同樣語境就不再問。"
+                 "「一律取代」不看前後文直接換。")
+MODES = [(hotwords.CONTEXT, "自動判斷"), (hotwords.ALWAYS, "一律取代")]
 
 
 class SettingsDialog(QDialog):

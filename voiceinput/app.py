@@ -94,9 +94,9 @@ class App(QObject):
         self._probe: ContextProbe | None = None
         self._menu_open = False
         # ("candidates", Selection) | ("span", start, end, word) | ("suspect", Utterance, Suspect)
+        # | ("learn", key, value, context words): the ✓ box offering a new hotword
         self._menu = None
-        self._undo = None                       # hotword the last "learned" notification can undo (click)
-        self._learned = None                    # last learned hotword ("不要記")
+        self._learned = None                    # last hotword added with ✓ ("不要記" removes it)
         self._caption_raw = ""
         self._caption = ""
 
@@ -106,6 +106,7 @@ class App(QObject):
         self.overlay = Overlay(lambda: self.recorder.level, self._caption_text)
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
+        self.picker.confirmed.connect(self.on_learn_confirmed)
         self.settings = SettingsDialog(self.cfg, self.hotwords)
         self.settings.applied.connect(self.apply_settings)
         self.settings.models_dir_chosen.connect(self.change_models_dir)
@@ -118,7 +119,6 @@ class App(QObject):
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(
             lambda reason: self.open_settings() if reason == QSystemTrayIcon.Trigger else None)
-        self.tray.messageClicked.connect(self._undo_learned)
         self.tray.show()
 
         self.pressed.connect(self.on_press)
@@ -260,7 +260,7 @@ class App(QObject):
         self.recording = True
         self._caption_raw = self._caption = ""
         self._probe = ContextProbe(self.cfg.edit_enabled, self.cfg.screen_terms)
-        self._menu_open = self.picker.isVisible()
+        self._menu_open = self.picker.isVisible() and self.picker.voice_pickable   # the ✓ box ignores speech
         self._hwnd = foreground()
         self.tray.setIcon(self.icon_rec)
         self.overlay.show_recording()
@@ -376,9 +376,9 @@ class App(QObject):
         log.info("offer: %s -> %s%s", sus.word, sus.options, " (context hotword)" if sus.hotword else "")
         self._menu = ("suspect", u, sus)
         if sus.hotword is not None:
-            title = f"「{sus.word}」要換成「{sus.options[0]}」嗎？說「對」換掉，「不用」保留（會記住這個語境）"
+            title = f"「{sus.word}」換成？說「對」或「不用」"
         else:
-            title = f"可能聽錯「{sus.word}」：說「對」換成 1，或說第幾個"
+            title = f"可能聽錯「{sus.word}」，說「對」或第幾個"
         self.picker.show_list(title, sus.options, caret_rect(), timeout_ms=15_000)
         s.ignore_rects = [self.picker.physical_rect()]
 
@@ -473,7 +473,7 @@ class App(QObject):
             self._notify(f"「{word}」沒有同音候選")
             return
         self._menu = ("span", a, b, word)
-        self.picker.show_list(f"選字：{word}　點選或說「第幾個」", words, caret_rect())
+        self.picker.show_list(f"選字：{word}　點選或說第幾個", words, caret_rect())
         self.session.ignore_rects = [self.picker.physical_rect()]
 
     def _rewrite_later(self, a: int, b: int, new: str, note: str, learn=None):
@@ -499,6 +499,9 @@ class App(QObject):
 
     def _undo_step(self):
         self.overlay.hide_overlay()
+        if self._menu and self._menu[0] == "learn":
+            self.picker.hide()        # the change it was offered for is being undone
+            self._menu = None
         s = self.session
         step = s.pop_undo()
         if step is None:
@@ -523,10 +526,8 @@ class App(QObject):
         self._learned = None
 
     def _forget_hotword(self, h):
-        log.info("hotword undone: %s -> %s", h.key, h.value)
+        log.info("hotword removed: %s -> %s", h.key, h.value)
         self.hotwords.remove(h)
-        if self._undo is h:
-            self._undo = None
         self.settings.refresh_hotwords()
 
     def _notify(self, text: str):
@@ -576,7 +577,6 @@ class App(QObject):
 
     def on_edited(self, sel, ed, note: str):
         self.overlay.hide_overlay()
-        self._undo = None   # a click on any newer notification must not undo an older hotword
         if ed.action == edit.DELETE:
             press_delete()
             self.session.replaced_selection(sel.before, sel.text, "", foreground(), f"刪除「{sel.text}」")
@@ -653,33 +653,41 @@ class App(QObject):
             self.hotwords.save()
 
     def _learn(self, old: str, new: str, spelled: bool, source: str = "", context=None):
-        """Record old -> new as a hotword if the edit looks like a correction of a misrecognition."""
+        """If the edit looks like a correction of a misrecognition, offer old -> new as a hotword in the ✓ box.
+        Nothing is added until the user clicks ✓ (decided 2026-09-29; it used to be added and then undoable).
+        Returns None: steps no longer carry a hotword to remove on undo."""
         if not worth_learning(old, new, spelled):
             return None
-        known = self.hotwords.find(old.strip())
-        if known is not None and known.value == new.strip():
+        old, new = old.strip(), new.strip()
+        known = self.hotwords.find(old)
+        if known is not None and known.value == new:
             if context:
                 known.remember(context, True)   # one more sentence where it was right
                 self.hotwords.save()
-            return None   # already known: nothing new to announce or to undo
+            return None
         if known is not None:
             # 城市 -> 乘勢 picked once must not overwrite 城市 -> 程式; this sentence just was not a 程式 one
-            log.info("not learning %s -> %s: hotword %s -> %s exists", old, new, known.key, known.value)
+            log.info("not offering %s -> %s: hotword %s -> %s exists", old, new, known.key, known.value)
             if context and known.mode != "always":
                 known.remember(context, False)
                 self.hotwords.save()
             return None
-        h = self.hotwords.add(old.strip(), new.strip(), context=context)
-        log.info("learned hotword%s: %s -> %s near %s", f" ({source})" if source else "", h.key, h.value, context)
-        self._undo = self._learned = h
-        self.settings.refresh_hotwords()
-        self.tray.showMessage("已記住熱詞", f"{h.key} → {h.value}（說「不要記」或點這裡取消）", self.icon_idle, 4000)
-        return h
+        log.info("offer hotword%s: %s -> %s near %s", f" ({source})" if source else "", old, new, context)
+        self._menu = ("learn", old, new, context)
+        self.picker.show_confirm("加入熱詞？點 ✓ 加入", f"{old} → {new}", caret_rect())
+        self.session.ignore_rects = [self.picker.physical_rect()]
+        return None
 
-    def _undo_learned(self):
-        if self._undo is not None:
-            self._forget_hotword(self._undo)
-            self._learned = None
+    def on_learn_confirmed(self):
+        menu, self._menu = self._menu, None
+        self.session.ignore_rects = []
+        if not menu or menu[0] != "learn":
+            return
+        _, old, new, context = menu
+        h = self.hotwords.add(old, new, context=context)
+        log.info("hotword added: %s -> %s near %s", h.key, h.value, context)
+        self._learned = h
+        self.settings.refresh_hotwords()
 
     # --- settings / status ---
     def on_status(self, text: str):
