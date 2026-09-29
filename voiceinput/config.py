@@ -1,9 +1,9 @@
 """Settings persisted as config.json in the per-user data folder (see paths.py)."""
 import json
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import asdict, dataclass, field
 
-from .paths import CONFIG_PATH, DEFAULT_MODELS_DIR
+from .edit import DELETE_WORDS, PICK_WORDS
+from .paths import CONFIG_PATH
 
 
 @dataclass
@@ -12,12 +12,9 @@ class Config:
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
-    edit_enabled: bool = True      # speaking with text selected edits the selection (刪除, spelling, replace)
-    models_dir: str = ""           # where the models are stored, "" = paths.DEFAULT_MODELS_DIR
-    voice_commands: bool = True    # 復原 / 送出 / 換行 / 城市改成程式 … on what was just dictated (commands.py)
-    live_caption: bool = True      # streaming X-ASR shows the words while the hotkey is held
-    second_opinion: bool = True    # SenseVoice re-checks each dictation in the background; suspects are offered
-    screen_terms: bool = True      # English terms visible in the focused app bias X-ASR
+    # spoken on a selection: delete it / open the candidate menu (edit.py)
+    delete_words: list = field(default_factory=lambda: list(DELETE_WORDS))
+    pick_words: list = field(default_factory=lambda: list(PICK_WORDS))
 
     @classmethod
     def load(cls) -> "Config":
@@ -27,9 +24,6 @@ class Config:
             return cls()
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**known)
-
-    def models_path(self) -> Path:
-        return Path(self.models_dir) if self.models_dir else DEFAULT_MODELS_DIR
 
     def save(self) -> None:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

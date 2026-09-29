@@ -1,13 +1,14 @@
-"""What VoiceInput knows about the text right before the caret, so it can be edited by voice without selecting.
+"""What VoiceInput knows about the text right before the caret.
 
 Every dictation is pasted at the caret. As long as the user has not pressed a key or clicked since, and the same
-window is in front, the text before the caret ends with exactly what we pasted (the "buffer"). Edits to it
-("城市改成程式", "刪掉上一句", "復原", a picked suggestion) are done by pressing Backspace up to the edit point
-and pasting the new tail. This works in any app, terminals included (Claude Code), because it needs neither
-UI Automation nor a selection. Any key press or mouse click from the user ends the buffer: the caret may have
-moved.
+window is in front, the text before the caret ends with exactly what we pasted (the "buffer"). Changes to it (a
+picked suggestion, undo) are done by pressing Backspace up to the edit point and pasting the new tail. This works
+in any app, terminals included (Claude Code), because it needs neither UI Automation nor a selection. Any key
+press or mouse click from the user ends the buffer: the caret may have moved.
 
-Undo keeps the buffer before each change; "復原" rewrites the tail back to it.
+Undo (double tap of the hotkey) keeps the buffer before each change and rewrites the tail back to it.
+Corrections are learned two ways: a dictation deleted and said again (redictation_pair), and a dictation edited
+by hand, found by comparing it with the text box a few seconds after the user stops typing (typed_fix).
 """
 import difflib
 import re
@@ -36,12 +37,12 @@ class Utterance:
     start: int              # span of the pasted text in Session.buffer
     end: int
     text: str               # what was pasted
-    transcript: object      # asr.Transcript of the primary model
     audio: object           # numpy audio, for the second-opinion model
     at: float = field(default_factory=time.monotonic)
     second: str | None = None   # second model's formatted text, filled in the background
-    deleted: bool = False       # removed by Backspace/Delete or by voice, without typing anything else
+    deleted: bool = False       # removed by Backspace/Delete or undo, without typing anything else
     typed: bool = False         # the user typed other keys after it
+    fix_offered: bool = False   # a hand-made correction of it was already offered as a hotword
 
 
 @dataclass
@@ -50,7 +51,6 @@ class Step:
     after: str
     spans: list             # utterance spans before the change, to restore on undo
     note: str
-    hotword: object = None  # hotword learned by this change, forgotten on undo
 
 
 class Session:
@@ -85,10 +85,6 @@ class Session:
         """True if the text before the caret is known to end with self.buffer."""
         return not self.dirty and bool(self.buffer) and self.hwnd == foreground()
 
-    def last_utterance(self) -> Utterance | None:
-        with self._lock:
-            return self.utterances[-1] if self.clean() and self.utterances else None
-
     def redictation_of(self) -> Utterance | None:
         """The previous dictation if it was just deleted (keys or voice) and not replaced by typing."""
         u = self.last
@@ -97,7 +93,7 @@ class Session:
         return None
 
     # --- changes (the caller performs the keystrokes this returns) ---
-    def dictated(self, text: str, transcript, audio, hwnd: int) -> Utterance:
+    def dictated(self, text: str, audio, hwnd: int) -> Utterance:
         """Record a paste of text at the caret."""
         with self._lock:
             if self.dirty or hwnd != self.hwnd:
@@ -106,25 +102,19 @@ class Session:
             spans = self._spans()
             start = len(self.buffer)
             self.buffer += text
-            u = Utterance(start, len(self.buffer), text, transcript, audio)
+            u = Utterance(start, len(self.buffer), text, audio)
             self.utterances.append(u)
             self.steps.append(Step(before, self.buffer, spans, f"輸入「{text}」"))
             self.last = u
             self.hwnd, self.dirty = hwnd, False
             return u
 
-    def replaced_selection(self, before: str, old: str, new: str, hwnd: int, note: str, hotword=None):
+    def replaced_selection(self, before: str, old: str, new: str, hwnd: int, note: str):
         """Record an edit of a selection: the caret now follows new, with before (rest of the line) ahead."""
         with self._lock:
             self.buffer, self.utterances = before + new, []
-            self.steps = [Step(before + old, self.buffer, [], note, hotword)]
+            self.steps = [Step(before + old, self.buffer, [], note)]
             self.hwnd, self.dirty = hwnd, False
-
-    def sent(self):
-        """Enter was pressed: the text left the input box."""
-        with self._lock:
-            self.buffer, self.utterances, self.steps = "", [], []
-            self.dirty = True
 
     def plan_replace(self, a: int, b: int, new: str) -> tuple[int, str]:
         """Keystrokes to turn buffer[a:b] into new: (backspaces, text to paste)."""
@@ -138,31 +128,25 @@ class Session:
             p += 1
         return len(self.buffer) - p, after[p:]
 
-    def apply_replace(self, a: int, b: int, new: str, note: str, hotword=None):
+    def apply_replace(self, a: int, b: int, new: str, note: str):
         with self._lock:
             before, spans = self.buffer, self._spans()
             self.buffer = before[:a] + new + before[b:]
             delta = len(new) - (b - a)
             keep = []
             for u in self.utterances:
-                if a == b == u.end and u is self.utterances[-1]:
-                    u.end += delta       # text added right after the last sentence (問號) belongs to it
-                    u.text = self.buffer[u.start:u.end]
-                    keep.append(u)
-                elif u.end <= a:
+                if u.end <= a:
                     keep.append(u)
                 elif u.start >= b:
                     u.start += delta
                     u.end += delta
                     keep.append(u)
-                elif a <= u.start and u.end <= b and not new:
-                    u.deleted = True     # removed entirely (刪掉上一句)
                 else:
                     u.end = max(u.start, u.end + delta)
                     u.text = self.buffer[u.start:u.end]
                     keep.append(u)
             self.utterances = keep
-            self.steps.append(Step(before, self.buffer, spans, note, hotword))
+            self.steps.append(Step(before, self.buffer, spans, note))
             self.dirty = False
 
     def pop_undo(self) -> Step | None:
@@ -214,3 +198,52 @@ def redictation_pair(old: str, new: str) -> tuple[str, str] | None:
         return None
     _, i1, i2, j1, j2 = ops[0]
     return _join(a[i1:i2]), _join(b[j1:j2])
+
+
+_BOUNDARY = re.compile(r"[\n，。！？；：,.!?;:]")
+_MAX_FIX = 20   # characters a hand-made change may add
+
+
+def typed_fix(old: str, text: str) -> tuple[str, str] | None:
+    """(wrong, right) if text (the text box, read after the user stopped typing) holds old with one word or
+    phrase changed by hand: 我們去城市 edited to 我們去程式 gives (城市, 程式). The edited copy is found by the
+    longest prefix and suffix of old it still has; an edit at either end reaches to the nearest punctuation or
+    line break."""
+    old = old.strip()
+    if len(old) < 2 or old in text:
+        return None
+    best = None
+    for p in range(len(old) - 1, -1, -1):   # longest prefix still in the text
+        i = text.rfind(old[:p]) if p else -1
+        if p and i < 0:
+            continue
+        for q in range(len(old) - p, -1, -1):   # then the longest suffix after it
+            if p + q < max(2, len(old) // 3):
+                break
+            if not q:
+                if not p:
+                    break
+                start = i + p
+                m = _BOUNDARY.search(text, start, start + len(old) - p + _MAX_FIX)
+                best = (i, m.start() if m else min(len(text), start + len(old) - p + _MAX_FIX))
+                break
+            if p:
+                lo = i + p
+                j = text.find(old[-q:], lo, lo + len(old) - p - q + _MAX_FIX + q)
+            else:
+                j = text.rfind(old[-q:])
+            if j < 0:
+                continue
+            if p:
+                best = (i, j + q)
+            else:
+                cut = max((m.end() for m in _BOUNDARY.finditer(text, max(0, j - len(old) - _MAX_FIX), j)),
+                          default=max(0, j - (len(old) - q) - _MAX_FIX))
+                best = (cut, j + q)
+            break
+        if best:
+            break
+    if not best:
+        return None
+    new = text[best[0]:best[1]].strip()
+    return redictation_pair(old, new) if new and new != old else None

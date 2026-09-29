@@ -3,6 +3,10 @@
 On Windows the hotkey is suppressed with a low-level hook so holding CapsLock
 does not toggle caps state. A short tap (< TAP_THRESHOLD) is replayed as a
 normal key press, so CapsLock still works as CapsLock when tapped.
+
+A double tap (second press within DOUBLE_TAP_GAP of a tap) calls on_double() before on_press(): the app undoes
+the last dictation, and holding the second press records again. Two replayed taps cancel out; when the second
+press is held (no replay) one more tap is replayed so the first tap's toggle is undone.
 """
 import sys
 import threading
@@ -11,6 +15,7 @@ import time
 from pynput import keyboard
 
 TAP_THRESHOLD = 0.3  # seconds; shorter presses are treated as a normal tap
+DOUBLE_TAP_GAP = 0.35  # seconds from a tap's release to the next press to count as a double tap
 
 HOTKEYS = {
     "caps_lock": ("CapsLock", keyboard.Key.caps_lock),
@@ -28,12 +33,15 @@ _LLKHF_INJECTED = 0x10
 class PushToTalk:
     """Calls on_press() when the hotkey goes down and on_release(held_seconds) when it goes up."""
 
-    def __init__(self, key_name: str, on_press, on_release, on_other_key=None):
+    def __init__(self, key_name: str, on_press, on_release, on_other_key=None, on_double=None):
         self.on_press = on_press
         self.on_release = on_release
+        self.on_double = on_double
         self.on_other_key = on_other_key   # on_other_key(vk): any other key the user pressed (Windows only)
         self._key_name = key_name
         self._down_at = None
+        self._tap_up_at = None      # release time of the last short tap (double-tap detection)
+        self._double = False        # the current press is the second of a double tap
         self._listener = None
         self._controller = keyboard.Controller()
         self._replaying = False
@@ -86,15 +94,23 @@ class PushToTalk:
         if self._down_at is not None:  # auto-repeat
             return
         self._down_at = time.monotonic()
+        self._double = self._tap_up_at is not None and self._down_at - self._tap_up_at < DOUBLE_TAP_GAP
+        self._tap_up_at = None
+        if self._double and self.on_double:
+            self.on_double()
         self.on_press()
 
     def _handle_up(self):
         if self._down_at is None:
             return
-        held = time.monotonic() - self._down_at
+        now = time.monotonic()
+        held = now - self._down_at
         self._down_at = None
         self.on_release(held)
-        if held < TAP_THRESHOLD and sys.platform == "win32":
+        tap = held < TAP_THRESHOLD
+        self._tap_up_at = now if tap and not self._double else None
+        undo_toggle = self._double and not tap and self._key_name == "caps_lock"
+        if (tap or undo_toggle) and sys.platform == "win32":
             # Replay the tap outside the hook callback
             threading.Thread(target=self._replay_tap, daemon=True).start()
 

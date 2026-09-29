@@ -65,8 +65,8 @@ def say(name, wait=6.0):
         print("!! focus lost, aborting")
         sys.exit(1)
     audio = load(name)
-    probe = selection.ContextProbe(A.cfg.edit_enabled, A.cfg.screen_terms)
-    A.worker.submit(A._transcribe_job, A.recognizer, audio, probe, A.picker.isVisible(), HWND)
+    probe = selection.ContextProbe()
+    A.worker.submit(A._transcribe_job, A.recognizer, audio, probe, HWND)
     pump(wait)
     menu = A.picker.title.text() if A.picker.isVisible() else ""
     print(f"[{name}] -> {target_text()!r}" + (f"   MENU: {menu} {A.picker.candidates}" if menu else ""))
@@ -76,10 +76,9 @@ def say(name, wait=6.0):
 t0 = time.monotonic()
 while time.monotonic() - t0 < 180:
     pump(0.5)
-    if A.recognizer and (A.second or not A.cfg.second_opinion) and (A.preview or not A.cfg.live_caption):
+    if A.recognizer and A.second:
         break
-print(f"loaded in {time.monotonic() - t0:.1f}s: asr={bool(A.recognizer)} second={bool(A.second)} "
-      f"preview={bool(A.preview)}")
+print(f"loaded in {time.monotonic() - t0:.1f}s: asr={bool(A.recognizer)} second={bool(A.second)}")
 
 def windows(cls):
     found = []

@@ -1,28 +1,23 @@
 """Settings window with a live transcript log. Every change is applied and saved immediately."""
 import html
-from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-                               QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QTextBrowser,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QStackedWidget,
+                               QTextBrowser, QVBoxLayout, QWidget)
 
-from . import audio, hotwords
-from .paths import DEFAULT_MODELS_DIR
-from .models import is_subfolder
+from . import audio, edit, hotwords
 from .hotkey import HOTKEYS
 
-HOTWORDS_NOTE = ("選取文字後用語音修正（例如選「城市」說「程式」、選「Cloud」拼 C L A U D E）、說「城市改成程式」，"
-                 "或刪掉剛說的話再重講一次，會跳出小方塊詢問是否加入熱詞，點 ✓ 才會加入。加入後辨識時自動取代，英文詞也會用來引導辨識。"
-                 "「自動判斷」依前後的詞決定要不要換；沒把握時會跳出小方塊，說「對」換掉、「不用」保留，之後同樣語境就不再問。"
-                 "「一律取代」不看前後文直接換。")
+HOTWORDS_NOTE = ("修正辨識錯的字後（選取後改字或選字、刪掉重講、手動改字），會詢問是否加入熱詞。"
+                 "自動判斷：看前後文決定要不要換，沒把握時會問；一律取代：直接換。")
 MODES = [(hotwords.CONTEXT, "自動判斷"), (hotwords.ALWAYS, "一律取代")]
+_CARD_COLUMNS = 2
+_CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
 class SettingsDialog(QDialog):
     applied = Signal()
-    models_dir_chosen = Signal(str)   # new models folder, "" = default
 
     def __init__(self, cfg, hotword_store):
         super().__init__()
@@ -31,7 +26,6 @@ class SettingsDialog(QDialog):
         self._loading = False
         self.setWindowTitle("VoiceInput 設定")
         self.resize(940, 480)
-
 
         self.mic = QComboBox()
         self.mic.addItem("系統預設", "")
@@ -42,43 +36,35 @@ class SettingsDialog(QDialog):
         for key, (label, _) in HOTKEYS.items():
             self.hotkey.addItem(label, key)
 
-        self.models_dir = QLineEdit(readOnly=True)
-        browse = QPushButton("變更…", clicked=self._choose_models_dir)
-        reset = QPushButton("預設", clicked=lambda: self._set_models_dir(""))
-        models_dir_row = QHBoxLayout()
-        models_dir_row.addWidget(self.models_dir, 1)
-        models_dir_row.addWidget(browse)
-        models_dir_row.addWidget(reset)
-
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
-        self.edit_enabled = QCheckBox("選取文字後說話 = 編輯選取的文字（刪除、選字、拼字、改字）")
-        self.voice_commands = QCheckBox("語音指令：復原、送出、換行、刪掉上一句、「城市改成程式」（改剛剛說的內容）")
-        self.live_caption = QCheckBox("錄音時顯示即時字幕（串流 X-ASR，約 130MB）")
-        self.second_opinion = QCheckBox("背景複查可能聽錯的字（第二個語音模型 SenseVoice）")
-        self.screen_terms = QCheckBox("用畫面上的英文詞彙輔助辨識（X-ASR）")
-        hotwords_btn = QPushButton("熱詞…", clicked=lambda: self._show_page(1))
-        edit_row = QHBoxLayout()
-        edit_row.addWidget(self.edit_enabled)
-        edit_row.addStretch()
-        edit_row.addWidget(hotwords_btn)
-
+        self.delete_words = QLineEdit(placeholderText="、".join(edit.DELETE_WORDS))
+        self.pick_words = QLineEdit(placeholderText="、".join(edit.PICK_WORDS))
+        for box, tip in ((self.delete_words, "選取文字後說這些詞，會刪除選取的文字"),
+                         (self.pick_words, "選取文字後說這些詞，會列出同音字讓你點選")):
+            box.setToolTip(tip + "。多個詞用逗號或空格分開。")
+            box.editingFinished.connect(self._apply)
+        hotwords_btn = QPushButton("管理熱詞…", clicked=lambda: self._show_page(1))
+        hotwords_row = QHBoxLayout()
+        hotwords_row.addWidget(hotwords_btn)
+        hotwords_row.addStretch()
 
         self.status = QLabel()
         self.status.setStyleSheet("color: gray")
         self.status.setWordWrap(True)
 
         form = QFormLayout()
-        form.addRow("模型資料夾", models_dir_row)
         form.addRow("麥克風", self.mic)
-        form.addRow("錄音快捷鍵（按住）", self.hotkey)
+        hotkey_note = QLabel("按住說話；快按兩下撤銷剛輸入的文字，第二下按住可直接重講")
+        hotkey_note.setStyleSheet("color: gray")
+        hotkey_note.setWordWrap(True)
+        form.addRow("錄音快捷鍵", self.hotkey)
+        form.addRow("", hotkey_note)
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
-        form.addRow("", edit_row)
-        form.addRow("", self.voice_commands)
-        form.addRow("", self.live_caption)
-        form.addRow("", self.second_opinion)
-        form.addRow("", self.screen_terms)
+        form.addRow("刪除指令", self.delete_words)
+        form.addRow("選字指令", self.pick_words)
+        form.addRow("熱詞", hotwords_row)
 
         left = QVBoxLayout()
         left.addLayout(form)
@@ -112,22 +98,17 @@ class SettingsDialog(QDialog):
 
         for combo in (self.mic, self.hotkey):
             combo.currentIndexChanged.connect(self._apply)
-        for box in (self.strip_punct, self.autostart, self.edit_enabled, self.voice_commands,
-                    self.live_caption, self.second_opinion, self.screen_terms):
+        for box in (self.strip_punct, self.autostart):
             box.toggled.connect(self._apply)
 
     def load_values(self):
         self._loading = True
-        self._show_models_dir(self.cfg.models_path())
         self._select(self.mic, self.cfg.mic)
         self._select(self.hotkey, self.cfg.hotkey)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
         self.autostart.setChecked(self.cfg.autostart)
-        self.edit_enabled.setChecked(self.cfg.edit_enabled)
-        self.voice_commands.setChecked(self.cfg.voice_commands)
-        self.live_caption.setChecked(self.cfg.live_caption)
-        self.second_opinion.setChecked(self.cfg.second_opinion)
-        self.screen_terms.setChecked(self.cfg.screen_terms)
+        self.delete_words.setText("、".join(self.cfg.delete_words))
+        self.pick_words.setText("、".join(self.cfg.pick_words))
         self._loading = False
 
     def set_status(self, text: str):
@@ -164,33 +145,12 @@ class SettingsDialog(QDialog):
         self.cfg.hotkey = self.hotkey.currentData()
         self.cfg.strip_trailing_punct = self.strip_punct.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
-        self.cfg.edit_enabled = self.edit_enabled.isChecked()
-        self.cfg.voice_commands = self.voice_commands.isChecked()
-        self.cfg.live_caption = self.live_caption.isChecked()
-        self.cfg.second_opinion = self.second_opinion.isChecked()
-        self.cfg.screen_terms = self.screen_terms.isChecked()
+        self.cfg.delete_words = edit.split_words(self.delete_words.text())
+        self.cfg.pick_words = edit.split_words(self.pick_words.text())
         self.cfg.save()
         self.applied.emit()
 
-    def _show_models_dir(self, path: Path):
-        self.models_dir.setText(str(path))
-        self.models_dir.setToolTip(str(path))
-
-    def _choose_models_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "選擇模型資料夾（已下載的模型會搬過去）",
-                                                str(self.cfg.models_path()))
-        if path:
-            self._set_models_dir(path)
-
-    def _set_models_dir(self, path: str):
-        new = Path(path) if path else DEFAULT_MODELS_DIR
-        if is_subfolder(new, self.cfg.models_path()):
-            self.set_status("新的模型資料夾不能在目前的模型資料夾裡面，請選別的資料夾。")
-            return
-        self._show_models_dir(new)
-        self.models_dir_chosen.emit(path)
-
-    # --- hotwords page ---
+    # --- hotwords page: one card per hotword, in a grid ---
     def _build_hotwords_page(self) -> QWidget:
         back = QPushButton("← 返回設定", clicked=lambda: self._show_page(0))
         add = QPushButton("新增", clicked=self._add_hotword)
@@ -199,16 +159,17 @@ class SettingsDialog(QDialog):
         top.addStretch()
         top.addWidget(add)
 
-        self.hw_table = QTableWidget(0, 5)
-        self.hw_table.setHorizontalHeaderLabels(["辨識成（key）", "改成", "套用方式", "命中次數", ""])
-        header = self.hw_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for col in (2, 3, 4):
-            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        self.hw_table.verticalHeader().setVisible(False)
-        self.hw_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.hw_table.itemChanged.connect(self._hotword_edited)
+        self.hw_grid = QGridLayout()
+        self.hw_grid.setSpacing(6)
+        for c in range(_CARD_COLUMNS):
+            self.hw_grid.setColumnStretch(c, 1)
+        cards = QWidget()
+        inner = QVBoxLayout(cards)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.addLayout(self.hw_grid)
+        inner.addStretch(1)
+        self.hw_scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
+        self.hw_scroll.setWidget(cards)
 
         note = QLabel(HOTWORDS_NOTE)
         note.setStyleSheet("color: gray")
@@ -218,7 +179,7 @@ class SettingsDialog(QDialog):
         v = QVBoxLayout(page)
         v.setContentsMargins(0, 0, 0, 0)
         v.addLayout(top)
-        v.addWidget(self.hw_table, 1)
+        v.addWidget(self.hw_scroll, 1)
         v.addWidget(note)
         return page
 
@@ -228,39 +189,47 @@ class SettingsDialog(QDialog):
         self.pages.setCurrentIndex(i)
 
     def refresh_hotwords(self):
-        t = self.hw_table
-        t.blockSignals(True)
-        t.setRowCount(0)
-        for h in self.hotwords.items:
-            r = t.rowCount()
-            t.insertRow(r)
-            for col, text in ((0, h.key), (1, h.value)):
-                item = QTableWidgetItem(text)
-                item.setData(Qt.UserRole, h)
-                t.setItem(r, col, item)
-            hits = QTableWidgetItem(str(h.hits))
-            hits.setFlags(Qt.ItemIsEnabled)
-            hits.setTextAlignment(Qt.AlignCenter)
-            t.setItem(r, 3, hits)
-            mode = QComboBox()
-            for key, label in MODES:
-                mode.addItem(label, key)
-            self._select(mode, h.mode)
-            mode.currentIndexChanged.connect(lambda _, h=h, m=mode: self._set_mode(h, m.currentData()))
-            t.setCellWidget(r, 2, mode)
-            t.setCellWidget(r, 4, QPushButton("刪除", clicked=lambda _=False, h=h: self._remove_hotword(h)))
-        t.blockSignals(False)
+        while self.hw_grid.count():
+            w = self.hw_grid.takeAt(0).widget()
+            w.setParent(None)
+            w.deleteLater()
+        for i, h in enumerate(self.hotwords.items):
+            self.hw_grid.addWidget(self._hotword_card(h), i // _CARD_COLUMNS, i % _CARD_COLUMNS)
 
-    def _hotword_edited(self, item):
-        h = item.data(Qt.UserRole)
-        text = item.text().strip()
+    def _hotword_card(self, h) -> QFrame:
+        card = QFrame(objectName="card")
+        card.setStyleSheet(_CARD_STYLE)
+        key = QLineEdit(h.key, placeholderText="辨識成")
+        value = QLineEdit(h.value, placeholderText="改成")
+        for line, attr in ((key, "key"), (value, "value")):
+            line.editingFinished.connect(lambda e=line, a=attr: self._hotword_edited(h, a, e))
+        mode = QComboBox()
+        for k, label in MODES:
+            mode.addItem(label, k)
+        self._select(mode, h.mode)
+        mode.currentIndexChanged.connect(lambda _: self._set_mode(h, mode.currentData()))
+        hits = QLabel(f"{h.hits} 次")
+        hits.setStyleSheet("color: gray")
+        hits.setToolTip("命中次數")
+        remove = QPushButton("✕", clicked=lambda: self._remove_hotword(h))
+        remove.setFixedWidth(28)
+        remove.setToolTip("刪除")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(8, 4, 4, 4)
+        row.addWidget(key, 1)
+        row.addWidget(QLabel("→"))
+        row.addWidget(value, 1)
+        row.addWidget(mode)
+        row.addWidget(hits)
+        row.addWidget(remove)
+        return card
+
+    def _hotword_edited(self, h, attr: str, line: QLineEdit):
+        text = line.text().strip()
         if not text:
-            self.refresh_hotwords()   # an emptied cell reverts
+            line.setText(getattr(h, attr))   # an emptied field reverts
             return
-        if item.column() == 0:
-            h.key = text
-        else:
-            h.value = text
+        setattr(h, attr, text)
         self.hotwords.save()
 
     def _set_mode(self, h, mode):
@@ -272,12 +241,11 @@ class SettingsDialog(QDialog):
         self.refresh_hotwords()
 
     def _add_hotword(self):
-        h = hotwords.Hotword("", "")
-        self.hotwords.items.append(h)
+        self.hotwords.items.append(hotwords.Hotword("", ""))
         self.refresh_hotwords()
-        row = self.hw_table.rowCount() - 1
-        self.hw_table.scrollToBottom()
-        self.hw_table.editItem(self.hw_table.item(row, 0))
+        card = self.hw_grid.itemAt(self.hw_grid.count() - 1).widget()
+        self.hw_scroll.ensureWidgetVisible(card)
+        card.findChild(QLineEdit).setFocus()
 
     def hideEvent(self, e):
         self.hotwords.items = [h for h in self.hotwords.items if h.key and h.value]   # drop unfinished rows

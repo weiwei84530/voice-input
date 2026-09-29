@@ -1,147 +1,45 @@
 """Voice edits on selected text: decide what the spoken words mean for the selection.
 
-Commands are recognised by pinyin so ASR homophones still count (選字 is often heard as 選自): 刪除 deletes, 選字
-opens the candidate menu, letters spelled one by one replace the selection (keeping its capitalisation), 教育的育
-names a character, 改成X replaces with X, punctuation names and 大寫 / 小寫 are done in code, and anything else
-replaces the selection as spoken. Saying the selected word again means "not this one": open the candidate menu.
-Instructions that need understanding (翻譯成英文, 改得有禮貌一點) are not supported since the LLM was removed
-(2026-09-29); they replace the selection like any other words.
+A delete trigger (刪除) deletes the selection, a pick trigger (選字) or saying the selected word again opens the
+candidate menu, anything else replaces the selection as spoken. The trigger words are user settings, matched by
+toneless pinyin because ASR hears 選字 as 選自. Spelling letters, 教育的育, 改成X, 大寫 / 小寫 and punctuation
+names were removed 2026-09-29: corrections are made by selecting with the mouse and picking.
 """
 import re
 from dataclasses import dataclass
 
 from .candidates import syllables
 
-DELETE, CANDIDATES, REPLACE, REPICK = "delete", "candidates", "replace", "repick"
+DELETE, CANDIDATES, REPLACE = "delete", "candidates", "replace"
+DELETE_WORDS = ["刪除", "刪掉", "刪除掉"]
+PICK_WORDS = ["選字", "換字", "改字"]
 
-_DELETE = [syllables(w) for w in ("刪除", "刪掉", "刪除掉")]
-_CANDIDATE = [syllables(w) for w in ("選字", "換字", "改字")]
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:]+")
-_SPELLED_RAW = re.compile(r"^\s*[A-Za-z](?:[\s,，.。-]+[A-Za-z])+[\s,，.。]*$")
 _TRAILING = re.compile(r"[。，,.！？!?；;]+$")
-_CHANGE_TO = re.compile(r"(?:改成|換成|改為|換為|變成|寫成)(.+)$")
-# Punctuation by spoken name
-_SYMBOLS = {"句號": "。", "句點": "。", "逗號": "，", "問號": "？", "驚嘆號": "！", "感嘆號": "！", "驚歎號": "！",
-            "頓號": "、", "分號": "；", "冒號": "：", "點點點": "……", "刪節號": "……", "省略號": "……"}
-_SYM = "|".join(sorted(_SYMBOLS, key=len, reverse=True))
-_SYMBOL_CHANGE = re.compile(rf"^(?:把)?(?:({_SYM}))?(?:都)?(?:改成|換成|變成|改為|換為)(?:標點符號的|標點的|符號的)?({_SYM})$")
-_ONLY_PUNCT = re.compile(r"^[\s，。、！？；：,.!?;:…]+$")
-_END_PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
-_ANY_PUNCT = re.compile(r"[，。、！？；：,.!?;:…]")
-_CASE = re.compile(r"^(?:改成|換成|變成|全部)?(?:全)?(?:大寫|小寫)(?:字母)?$")
-_ORDINALS = "一二三四五六七八九"
-_PICK = re.compile(rf"^(?:選)?第?([{_ORDINALS}兩1-9])(?:個|號)?$")
-_YES = {"對", "對的", "是", "是的", "好", "好的", "沒錯", "確定", "要", "換", "改"}
-_NO = {"不用", "不是", "不要", "不對", "取消", "關掉", "算了", "不用了", "不換"}
-# Spelling out a character the way people do on the phone: 教育的育, 偉大的偉字, 弓長張 (2026-09-29: the user said
-# 教育的育 on a selected 玉 and it was pasted literally)
-_DESCRIBE = re.compile(r"^(?:是)?([㐀-䶿一-鿿]{1,4}?)的([㐀-䶿一-鿿])字?$")
-_SURNAMES = {"弓長張": "張", "立早章": "章", "木子李": "李", "口天吳": "吳", "耳東陳": "陳", "草頭黃": "黃",
-             "雙木林": "林", "古月胡": "胡", "言午許": "許", "雙口呂": "呂", "人可何": "何", "三橫王": "王",
-             "文武斌": "斌", "雙人徐": "徐", "禾子季": "季", "木易楊": "楊", "女喬嬌": "嬌", "日月明": "明"}
+_SPLIT = re.compile(r"[\s,，、;；]+")
 
 
 @dataclass
 class Edit:
     action: str
     text: str = ""        # replacement (REPLACE)
-    spelled: bool = False
 
 
-def match_case(word: str, like: str) -> str:
-    """Give a spelled word the capitalisation of the word it replaces (Cloud + CLAUDE -> Claude)."""
-    letters = [c for c in like if c.isascii() and c.isalpha()]
-    if not letters:
-        return word
-    if all(c.isupper() for c in letters) and len(letters) > 1:
-        return word.upper()
-    if letters[0].isupper():
-        return word[:1].upper() + word[1:].lower()
-    return word.lower()
+def split_words(text: str) -> list[str]:
+    """Trigger words typed in the settings, separated by commas or spaces."""
+    return [w for w in _SPLIT.split(text) if w]
 
 
-def parse_pick(formatted: str) -> int:
-    """Menu row (0-based) for 第二個 / 二 / 2 / 選三, 0 for 對 / 好, -2 for 不用 / 取消, else -1."""
+def plan(selected: str, formatted: str, delete_words: list[str], pick_words: list[str]) -> Edit:
+    """formatted: the spoken text after format_text / hotwords."""
     spoken = _PUNCT.sub("", formatted)
-    if spoken in _YES:
-        return 0
-    if spoken in _NO:
-        return -2
-    m = _PICK.match(spoken)
-    if not m:
-        return -1
-    ch = m.group(1)
-    return (2 if ch == "兩" else int(ch) if ch.isdigit() else _ORDINALS.index(ch) + 1) - 1
-
-
-def described_char(spoken: str) -> str | None:
-    """教育的育 -> 育, 弓長張 -> 張. ASR often hears the last character as a homophone (教育的欲), so the
-    character is taken from the describing word by sound."""
-    spoken = _PUNCT.sub("", spoken)
-    if spoken in _SURNAMES:
-        return _SURNAMES[spoken]
-    m = _DESCRIBE.match(spoken)
-    if not m:
-        return None
-    word, ch = m.groups()
-    if ch in word:
-        return ch
-    sound = syllables(ch)[0]
-    same = [c for c in word if syllables(c)[0] == sound]
-    return same[-1] if same else None
-
-
-def replace_char(selected: str, ch: str) -> str:
-    """Put the described character into the selection: a single character is replaced, in a longer selection
-    the character that sounds like it (雨薇 + 教育的育 -> 育薇). Unchanged if none sounds alike."""
-    text = selected.strip()
-    if len(text) <= 1:
-        return ch
-    sound = syllables(ch)[0]
-    for i, c in enumerate(text):
-        if c != ch and syllables(c)[0] == sound:
-            return text[:i] + ch + text[i + 1:]
-    return selected
-
-
-def plan(selected: str, raw: str, formatted: str) -> Edit:
-    """raw: ASR output (for detecting spelled letters); formatted: the text after format_text / hotwords."""
-    spoken = _PUNCT.sub("", formatted)
-    if not spoken:
-        return Edit(REPICK)
+    if not spoken or spoken == _PUNCT.sub("", selected):
+        return Edit(CANDIDATES)          # the same word again: "not this one"
     sounds = syllables(spoken)
-    if sounds in _DELETE:
+    if any(sounds == syllables(w) for w in delete_words):
         return Edit(DELETE)
-    if sounds in _CANDIDATE:
+    if any(sounds == syllables(w) for w in pick_words):
         return Edit(CANDIDATES)
-    if _SPELLED_RAW.match(raw):
-        word = re.sub(r"[^A-Za-z]", "", raw)
-        return Edit(REPLACE, match_case(word, selected), spelled=True)
-    if spoken == _PUNCT.sub("", selected):
-        return Edit(REPICK)
-    m = _CHANGE_TO.search(spoken)
-    ch = described_char(m.group(1) if m else spoken)
-    if ch:
-        new = replace_char(selected, ch)
-        if new != selected:
-            return Edit(REPLACE, new, spelled=True)   # spelled: an explicit correction, worth learning
-    m = _SYMBOL_CHANGE.match(spoken)
-    src, dst = (m.group(1), _SYMBOLS[m.group(2)]) if m else (None, _SYMBOLS.get(spoken))
-    if src and _SYMBOLS[src] in selected:                          # 句號改成問號: 好。 -> 好？
-        return Edit(REPLACE, selected.replace(_SYMBOLS[src], dst))
-    if dst and not src:                                            # 逗號 / 改成逗號
-        if _ONLY_PUNCT.match(selected) or selected.strip() in _SYMBOLS:   # 。/ 點點點 -> ，
-            return Edit(REPLACE, dst)
-        if _END_PUNCT.search(selected):                                    # 好。 -> 好，
-            return Edit(REPLACE, _END_PUNCT.sub("", selected) + dst)
-        if not _ANY_PUNCT.search(selected):                                # 好 -> 好，
-            return Edit(REPLACE, selected.rstrip() + dst)
-    if re.search(r"[A-Za-z]", selected) and _CASE.match(spoken):
-        return Edit(REPLACE, selected.upper() if "大寫" in spoken else selected.lower())
-    m = _CHANGE_TO.search(spoken)
-    if m and len(spoken) - len(m.group(1)) <= 4:     # 改成程式 / 把它改成程式: the words after 改成
-        new = _CHANGE_TO.search(formatted.strip()).group(1).strip()   # from the text with its spaces
-        return Edit(REPLACE, _TRAILING.sub("", new) if not _TRAILING.search(selected) else new)
     text = formatted.strip()
     if not _TRAILING.search(selected):
         text = _TRAILING.sub("", text)

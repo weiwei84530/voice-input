@@ -2,8 +2,6 @@
 import os
 import re
 import struct
-import threading
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -22,26 +20,6 @@ _TAGS = re.compile(r"<\|[^|]*\|>")
 # score 3, 城市 never became 程式), so Chinese words still rely on the text-level hotwords.
 _HOTWORD_SCORE = 2.0
 _LATIN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9 .'+#-]*$")
-_PUNCT_TOKEN = re.compile(r"^[\s，。？！、；：,.?!;:]*$")
-
-
-@dataclass
-class Transcript:
-    text: str                                          # raw recognizer text
-    tokens: list[str] = field(default_factory=list)    # per-token text (X-ASR only)
-    times: list[float] = field(default_factory=list)   # token start times in seconds
-    logprobs: list[float] = field(default_factory=list)
-    duration: float = 0.0
-
-    def pause_before_tail(self, tail_chars: int) -> float:
-        """Silence (s) before the last tail_chars non-punctuation characters, 0 when unknown.
-        Used to tell "…，送出" said after a pause from "把表單送出"."""
-        idx = [i for i, t in enumerate(self.tokens) if not _PUNCT_TOKEN.match(t)]
-        if not self.times or len(idx) <= tail_chars:
-            return 0.0
-        first, prev = idx[-tail_chars], idx[-tail_chars - 1]
-        # times are token starts; a CJK token lasts ~0.2s
-        return max(0.0, self.times[first] - self.times[prev] - 0.2)
 
 
 def _bpe_vocab(d: Path) -> str:
@@ -156,24 +134,15 @@ class Recognizer:
             out.append(spec if score == _HOTWORD_SCORE else f"{spec} :{score:g}")
         return "/".join(out)
 
-    def transcribe(self, audio: np.ndarray) -> str:
-        """Raw recognizer text; final formatting happens in textfmt."""
-        return self.recognize(audio).text
-
-    def recognize(self, audio: np.ndarray, hotwords: list[tuple[str, float]] | None = None) -> Transcript:
-        """Raw text plus, for X-ASR, token times and confidences. hotwords: (word, score) pairs, X-ASR only."""
-        duration = audio.size / SAMPLE_RATE
+    def recognize(self, audio: np.ndarray, hotwords: list[tuple[str, float]] | None = None) -> str:
+        """Raw recognizer text; final formatting happens in textfmt. hotwords: (word, score) pairs, X-ASR only."""
         if audio.size < SAMPLE_RATE * 0.2:
-            return Transcript("", duration=duration)
+            return ""
         spec = self.hotword_spec(hotwords) if hotwords and self.supports_hotwords else ""
         stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
         stream.accept_waveform(SAMPLE_RATE, audio.astype(np.float32))
         self._rec.decode_stream(stream)
-        r = stream.result
-        tr = Transcript(self._clean(r.text), duration=duration)
-        if self.key == "xasr":
-            tr.tokens, tr.times, tr.logprobs = list(r.tokens), list(r.timestamps), list(r.ys_log_probs)
-        return tr
+        return self._clean(stream.result.text)
 
     @staticmethod
     def _clean(text: str) -> str:
@@ -181,66 +150,3 @@ class Recognizer:
         text = _TAGS.sub("", text).strip()
         # X-ASR emits a space after full-width punctuation
         return _PUNCT_SPACE.sub(r"\1", text)
-
-
-class StreamingPreview:
-    """Live captions while the hotkey is held (streaming X-ASR). Display only: the final text still comes from
-    the offline X-ASR model after release. Audio is fed from the recorder callback and decoded on its own
-    thread so the audio callback never blocks."""
-
-    def __init__(self, d: Path):
-        self._rec = sherpa_onnx.OnlineRecognizer.from_transducer(
-            tokens=str(d / "tokens.txt"),
-            encoder=str(d / "encoder.int8.onnx"),
-            decoder=str(d / "decoder.onnx"),
-            joiner=str(d / "joiner.int8.onnx"),
-            num_threads=1,
-            sample_rate=SAMPLE_RATE,
-            decoding_method="greedy_search",
-        )
-        self._stream = None
-        self._pending: list[np.ndarray] = []
-        self._cond = threading.Condition()
-        self._active = False
-        self.text = ""
-
-    def start(self):
-        with self._cond:
-            self._stream = self._rec.create_stream()
-            self._pending = []
-            self._active = True
-            self.text = ""
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def feed(self, chunk: np.ndarray):
-        with self._cond:
-            if self._active:
-                self._pending.append(chunk)
-                self._cond.notify()
-
-    def stop(self):
-        with self._cond:
-            self._active = False
-            self._cond.notify()
-
-    def _run(self):
-        stream = self._stream
-        while True:
-            with self._cond:
-                while self._active and not self._pending:
-                    self._cond.wait()
-                if not self._active:
-                    return
-                data = np.concatenate(self._pending)
-                self._pending = []
-            stream.accept_waveform(SAMPLE_RATE, data)
-            while self._rec.is_ready(stream):
-                self._rec.decode_stream(stream)
-            text = self._clean(self._rec.get_result(stream))
-            if self._stream is stream:
-                self.text = text
-
-    @staticmethod
-    def _clean(text) -> str:
-        text = text if isinstance(text, str) else getattr(text, "text", "")
-        return _PUNCT_SPACE.sub(r"\1", text.strip())

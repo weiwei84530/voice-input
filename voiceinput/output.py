@@ -1,5 +1,5 @@
-"""Insert text into the focused app: put it on the clipboard, send paste, restore clipboard. Plus the few keys
-voice commands need (Backspace to rewrite what was just dictated, Enter to send, Shift+Enter for a new line)."""
+"""Insert text into the focused app: put it on the clipboard, send paste, restore clipboard. Plus Delete (a voice
+刪除 on a selection) and Backspace (undoing or rewriting what was just dictated)."""
 import ctypes
 import sys
 import time
@@ -55,18 +55,6 @@ def press_delete() -> None:
     """Delete the target app's current selection."""
     _kb.press(keyboard.Key.delete)
     _kb.release(keyboard.Key.delete)
-
-
-def press_enter() -> None:
-    _kb.press(keyboard.Key.enter)
-    _kb.release(keyboard.Key.enter)
-
-
-def press_newline() -> None:
-    """Shift+Enter: a new line in chat inputs and Claude Code, a plain line break in editors."""
-    with _kb.pressed(keyboard.Key.shift):
-        _kb.press(keyboard.Key.enter)
-        _kb.release(keyboard.Key.enter)
 
 
 def backspace(n: int) -> None:

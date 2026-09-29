@@ -4,12 +4,11 @@ import sys
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
 W, H = 132, 40
 BARS = 9
-CAPTION_W, CAPTION_H = 560, 34
 
 
 def _click_through(widget):
@@ -23,60 +22,16 @@ def _click_through(widget):
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOPMOST)
 
 
-class Caption(QWidget):
-    """Live transcript above the pill while recording (streaming ASR). Shows the end of the text."""
-
-    def __init__(self):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-                         | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setFixedSize(CAPTION_W, CAPTION_H)
-        self._text = ""
-        self._font = QFont()
-        self._font.setPixelSize(16)
-
-    def set_text(self, text: str, pill_x: int, pill_y: int):
-        if text == self._text and self.isVisible():
-            return
-        self._text = text
-        if not text:
-            self.hide()
-            return
-        self.move(pill_x + W // 2 - CAPTION_W // 2, pill_y - CAPTION_H - 8)
-        if not self.isVisible():
-            self.show()
-            _click_through(self)
-        self.update()
-
-    def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setFont(self._font)
-        fm = QFontMetrics(self._font)
-        text = fm.elidedText(self._text, Qt.ElideLeft, CAPTION_W - 28)
-        tw = fm.horizontalAdvance(text) + 28
-        x = (CAPTION_W - tw) / 2
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(x + 0.5, 0.5, tw - 1, CAPTION_H - 1), 10, 10)
-        p.fillPath(path, QColor(20, 20, 22, 225))
-        p.setPen(QColor(240, 240, 240))
-        p.drawText(QRectF(x, 0, tw, CAPTION_H), Qt.AlignCenter, text)
-        p.end()
-
-
 class Overlay(QWidget):
     IDLE, RECORDING, THINKING = range(3)
 
-    def __init__(self, level_source, caption_source=None):
+    def __init__(self, level_source):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
                          | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFixedSize(W, H)
         self._level_source = level_source   # callable -> float 0..1
-        self._caption_source = caption_source   # callable -> str (live transcript) or None
-        self.caption = Caption()
         self._state = self.IDLE
         self._levels = [0.0] * BARS
         self._t0 = time.monotonic()
@@ -95,7 +50,6 @@ class Overlay(QWidget):
         if self._state == self.IDLE:
             return
         self._state = self.IDLE
-        self.caption.set_text("", 0, 0)
         self._fade.stop()
         self._fade.setStartValue(self.windowOpacity())
         self._fade.setEndValue(0.0)
@@ -135,8 +89,6 @@ class Overlay(QWidget):
         if self._state == self.RECORDING:
             lvl = self._level_source()
             self._levels = self._levels[1:] + [lvl]
-        if self._caption_source is not None and self._state in (self.RECORDING, self.THINKING):
-            self.caption.set_text(self._caption_source(), self.x(), self.y())
         self.update()
 
     def paintEvent(self, _):

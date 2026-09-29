@@ -25,8 +25,7 @@
 
 Decided 2026-09-26 (the user plans to share the app with other users): code and runtime tools (`.tools/`, `.venv/`)
 stay in the app folder; user data lives in `paths.DATA_DIR` (`%LOCALAPPDATA%\VoiceInput`): `config.json`, logs, lock
-and `models/`. The models folder can be changed in settings (`Config.models_dir`); changing it moves the known
-model folders over. `paths.migrate_legacy()` moves the old in-app-folder data on first launch. Autostart is
+and `models/`. The models folder is fixed (the setting to move it was removed 2026-09-29). `paths.migrate_legacy()` moves the old in-app-folder data on first launch. Autostart is
 re-registered on every launch so it follows the app if its folder moves. Next step, not started: package as an exe
 with an installer (PyInstaller + Inno Setup).
 
@@ -39,10 +38,10 @@ Decided 2026-09-29: the app stays light, with a fixed set of sherpa-onnx models 
 |---|---|---|---|
 | Recognition | X-ASR int8 `sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03` | 130MB | ~0.75s for 18s audio; punctuation, good English |
 | Second opinion | SenseVoice Small `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17` | 155MB | ~0.1s per sentence; emits tags like `<\|zh\|>` that are stripped |
-| Live captions | X-ASR streaming 480ms int8 `sherpa-onnx-x-asr-480ms-streaming-zipformer-transducer-zh-en-punct-int8-2026-06-05` | 134MB | display only |
 
-Qwen3-ASR 0.6B (840MB, ~4.4s per 18s) and Fun-ASR-Nano (1GB, ~7.5s) were selectable before and were removed with the
-picker. As a second opinion Qwen3-ASR gave better alternatives but took ~1.2GB of the user's 8GB machine.
+Live captions (streaming X-ASR 480ms, 134MB) were removed 2026-09-29: they appeared too slowly to help; the pill
+shows only the level. Qwen3-ASR 0.6B (840MB, ~4.4s per 18s) and Fun-ASR-Nano (1GB, ~7.5s) were selectable before and
+were removed with the picker. As a second opinion Qwen3-ASR gave better alternatives but took ~1.2GB of the user's 8GB machine.
 Memory with everything on: ~1.1GB (was ~3GB with the LLM). The pinyin index held as Python objects is a large part.
 
 ## Text pipeline
@@ -65,61 +64,70 @@ CJK/ASCII spacing → trailing punctuation.
 - `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
 
+## Settings (2026-09-29)
+
+Only microphone, hotkey, strip trailing punctuation, autostart, the two trigger-word lists (刪除 / 選字, prefilled
+with the defaults in `edit.py`, editable) and the hotwords page (cards in two columns). Selection edits, the second
+opinion and on-screen terms are always on.
+
 ## Voice edits on selected text
 
-Plan agreed 2026-09-27. If text is selected when the hotkey goes down (`selection.py`, UI Automation TextPattern,
-read on a background thread), the utterance edits the selection instead of being pasted as new text (`edit.py`):
-刪除 → Delete key; 選字 or saying the selected word again → candidate menu; letters spelled one by one → that word,
-with the selection's capitalisation (Cloud + C L A U D E → Claude); 教育的育 / 弓長張 → that character; 改成X → X;
-大寫/小寫 and punctuation by name (。+ 改成逗號 → ，, 點點點 → ……, 句號改成問號, 好 + 問號 → 好？); anything else replaces
-the selection. Instructions that need understanding (翻譯成英文, 改得有禮貌一點) are not supported. Commands are matched
-by fuzzy pinyin because ASR hears 選字 as 選自.
+Plan agreed 2026-09-27, cut down 2026-09-29. If text is selected when the hotkey goes down (`selection.py`, UI
+Automation TextPattern, read on a background thread), the utterance edits the selection instead of being pasted as
+new text (`edit.py`): a delete trigger → Delete key; a pick trigger or saying the selected word again → candidate
+menu; anything else replaces the selection. Triggers are matched by fuzzy pinyin because ASR hears 選字 as 選自.
+Spelling letters, 教育的育, 改成X, 大寫/小寫 and punctuation names were removed: the user prefers selecting with the
+mouse and picking.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
 Terminals give no selection: Claude Code in Windows Terminal hides its mouse selection from UIA, Shift+arrow does
-not select, and a paste goes to the caret. Terminals are edited through the dictated-text buffer instead (below).
+not select, and a paste goes to the caret.
 
 Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency + POS) indexed by fuzzy toneless pinyin,
 cached in DATA_DIR/cache (build ~15s, load ~0.5s). Menu order: the second model's version of the word (when it
 came from a recent dictation), the value of a learned hotword for it, then homophones by exact pinyin and frequency.
-The menu (`picker.py`) is a non-activating window below the selection; a click or saying 第二個 / 二 / 對 picks.
+
+## Menus: mouse only (2026-09-29)
+
+The menu (`picker.py`) is a non-activating window. Speech never answers it: short answers (對, 第二個) were often
+misheard. The user clicks a row; a context hotword question has a last row 保留「X」 (what saying 不用 used to do);
+✕ or the timeout just closes it.
 
 ## Hotwords
 
 Every replacement that looks like a correction is offered as a hotword (`hotwords.json` in DATA_DIR, key = wrong
 text, value = correction) in a small box with a ✓ button; it is added only when the user clicks ✓ (decided
 2026-09-29, replacing "add, then offer undo"; speech never answers this box so the next utterance cannot confirm it
-by accident, and ✕ or 15s declines). Offered when: spelled, Chinese words of 2+ characters whose syllables all match (fuzzy zh/z, ing/in, l/n …;
-4+ characters may differ in one; 明天見 → 後天見 was once learned from 改成后天见), or similar Latin spelling. A one-character
+by accident, and ✕ or 15s declines). Offered when: Chinese words of 2+ characters whose syllables all match (fuzzy zh/z, ing/in, l/n …;
+4+ characters may differ in one), or similar Latin spelling. A one-character
 fix is learned with its neighbours (張雨薇: 雨 → 育 is stored as 張雨薇 → 張育薇). An existing hotword is never
 overwritten by a different value (picking 乘勢 for 城市 in one sentence must not replace 城市 → 程式); that
-sentence's words become a declined context instead. Saying 不要記 removes the hotword last added with ✓.
+sentence's words become a declined context instead. Offer sources: a replaced selection, a picked suggestion,
+a re-dictation, and a hand-made edit (below).
 
 Modes (settings: 一律取代 / 自動判斷): "always" replaces blindly. "context" (default) decides by the words around the key (`context_words`: content
 words within 6 characters, function words dropped). Each hotword keeps the words seen where the value was right
-(`contexts`: the sentence it was learned in, and every 對) and where it was wrong (`negatives`: every 不用). A declined
-word wins, then a confirmed one; with neither the key is left as spoken and the menu asks 「城市」要換成「程式」嗎. So
+(`contexts`: the sentence it was learned in, and every pick of the value) and where it was wrong (`negatives`:
+every 保留). A declined
+word wins, then a confirmed one; with neither the key is left as spoken and the menu asks 「城市」換成？ So
 台北這個城市 is asked once and then left alone, 修這個城市的 bug is replaced. Hotword values also bias X-ASR (below).
 
-## Hands-free editing (2026-09-29)
+## After a dictation (2026-09-29)
 
-Goal from the user: fix text by voice without touching the keyboard or mouse.
+Voice commands on what was just dictated (復原, 送出, 換行, 刪掉上一句, X改成Y, 刪掉X, symbol names, trailing 送出) were
+removed the same day they were built: the user corrects by selecting with the mouse instead. What remains:
 
 - **Dictated-text buffer (`session.py`)**: the text we pasted is known to sit right before the caret until the user
   presses a key (keyboard hook, injected keys ignored), clicks (mouse hook; clicks on our menu ignored) or another
-  window comes to the front. Edits to it are Backspace up to the edit point (one `SendInput` burst) + paste of the
-  new tail. Works in terminals too (tested with cmd in Windows Terminal: 23 backspaces + paste, and Enter).
-- **Voice commands (`commands.py`)**, without a selection: 復原 (undo stack of buffer states; also removes a hotword
-  learned by that step), 不要記, 送出 (Enter), 換行 (Shift+Enter), 刪掉上一句, 全部刪掉, X改成Y / 不是X是Y, 刪掉X,
-  bare symbol names (問號 replaces trailing punctuation). Matched by fuzzy pinyin (ASR wrote 復原 as 复员). X must be
-  found in the buffer (exact, case-insensitive, or same pinyin; 城市改成城市 heard for 城市改成程式 opens the candidate
-  menu); otherwise the utterance is dictated, so "把這個函式改成 async" still reaches Claude Code. A trailing 送出
-  presses Enter only after a pause: ASR punctuation before it or ≥0.35s gap in X-ASR token times (TTS: 0.64s with a
-  pause); 請把表單送出 is dictated. Enter is sent 150ms after the paste (WT reads the clipboard asynchronously).
-- **Character descriptions** (edit.py): 教育的育, 偉大的偉字, 弓長張 (table of common ones). The character is taken from the
-  describing word by sound because ASR writes 教育的欲. In a longer word the character that sounds alike is replaced
-  (雨薇 + 教育的育 → 育薇). Works with 改成 too (玉改成教育的育).
-- **Re-dictation learning**: dictation deleted (Backspace/Delete without typing, or 刪掉上一句 / 復原) and re-said within
-  45s → one changed word/phrase is offered (✓ box) (cloud → Claude, 城市 → 程式). Content changes fail `worth_learning`.
+  window comes to the front. Changes to it are Backspace up to the edit point (one `SendInput` burst) + paste of
+  the new tail; works in terminals too.
+- **Double tap of the hotkey (`hotkey.py`)** undoes the last change (dictation, replaced selection, picked
+  suggestion); holding the second press records again, so it becomes a re-dictation. CapsLock: the two replayed
+  taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
+- **Re-dictation learning**: dictation deleted (Backspace/Delete without typing, or double tap) and re-said within
+  45s → one changed word/phrase is offered (✓ box) (cloud → Claude, 城市 → 程式).
+- **Hand-made edits**: after a dictation, 3s after the user stops typing (within 120s), the focused control's visible
+  text is read by UIA and compared with the dictation (`session.typed_fix`: longest prefix/suffix anchors, then
+  `redictation_pair`). One changed word is offered (✓ box), once per dictation. Needs a TextPattern (not every app).
 - **X-ASR hotword biasing** (`asr.py`): modified beam search + per-stream hotwords, same speed as greedy (0.11-0.22s
   on 3s clips). The model's vocab is pure BPE with CJK as "▁X" pieces: `modeling_unit="bpe"`, CJK hotwords
   space-separated and converted to Simplified, and a `bpe.vocab` exported from `bpe.model` by a tiny protobuf reader
@@ -133,7 +141,6 @@ Goal from the user: fix text by voice without touching the keyboard or mouse.
   menu offers it. Words a hotword produced are never offered back (jieba's frequencies are mainland: 城市 25084 vs
   程式 197). Rare, because both models often share an error (主機版, 剪貼布). Guessing from the dictionary alone was
   rejected: every flag on 80 real utterances was wrong.
-- **Live captions**: the streaming model is fed from the recorder callback and shown above the pill.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
 - Tests without a microphone, with Windows TTS audio (zh-TW Hanhan voice via `dev/tts.ps1`):
   `dev/headless.py` runs the real App against a simulated text box with a private copy of `hotwords.json`; use it

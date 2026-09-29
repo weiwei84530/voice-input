@@ -18,7 +18,7 @@ User data lives outside the app folder, so it survives moving or reinstalling th
 | | Windows | macOS |
 |---|---|---|
 | Settings, logs | `%LOCALAPPDATA%\VoiceInput` | `~/Library/Application Support/VoiceInput` |
-| Models (default, changeable in settings) | `%LOCALAPPDATA%\VoiceInput\models` | `…/VoiceInput/models` |
+| Models | `%LOCALAPPDATA%\VoiceInput\models` | `…/VoiceInput/models` |
 
 Data from the old layout (`config.json`, `models/` inside the app folder) is moved there automatically on first launch.
 
@@ -27,41 +27,34 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
-- Left-click the tray icon to open settings (models folder, microphone, hotkey, trailing punctuation removal, launch at
-  login, voice commands, live captions, second opinion, on-screen terms, hotwords) and a per-utterance log for this
-  session. Changes apply immediately.
+- Double-tap the hotkey to undo what you just dictated; hold the second press to say it again.
+- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login, the
+  words for 刪除 / 選字, hotwords) and a per-utterance log for this session. Changes apply immediately.
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
-- Live captions appear above the indicator while you speak (streaming X-ASR, display only).
 
-## Editing by voice
+## Correcting
 
-What you just dictated can be changed without selecting it, as long as you have not pressed a key or clicked since
-(works in terminals too):
+Select text with the mouse, then hold the hotkey and say:
 
 | Say | Does |
 |---|---|
-| 城市改成程式 / 不是城市是程式 | replace a word in what you dictated (玉改成教育的育, `cloud 改成 C L A U D E`) |
-| 刪掉城市 / 刪掉上一句 / 全部刪掉 | delete |
-| 復原 | undo the last change |
-| 問號 / 逗號 … | type the symbol (replaces trailing punctuation) |
-| 換行 / 送出 | Shift+Enter / Enter; "…（pause）送出" at the end of a sentence pastes and sends |
-| 不要記 | forget the hotword just learned |
+| 刪除 (editable in settings) | delete the selection |
+| 選字 (editable), or the selected word again | a menu of same-sounding words; click one |
+| anything else | replaces the selection |
 
-With text selected: 刪除, 選字 (candidate menu), a new word, 改成X, spelled letters, 教育的育, 大寫 / 小寫, or a
-punctuation name.
 After a dictation a small menu may offer a likely misheard word (a second model heard it differently), or ask whether
-a learned correction applies here (「城市」要換成「程式」嗎): say 對, 第幾個 or 不用. Corrections are offered as hotwords (click ✓ to add),
-including a sentence deleted and said again; a hotword remembers the words around it to decide next time.
+a learned correction applies here (「城市」換成？ with a 保留「城市」 row). Menus are answered with the mouse only.
+Corrections are offered as hotwords (click ✓ to add): a replaced selection, a picked word, a sentence undone and said
+again, or a word you fixed by typing. A hotword remembers the words around it to decide next time.
 
 ## Models
 
-Fixed, all [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models, ~420MB in total, no LLM:
+Fixed, all [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models, ~285MB in total, no LLM:
 
 | Model | Size | Role |
 |---|---|---|
 | X-ASR int8 | 130MB | Recognition (~0.75s for 18s of audio on CPU); punctuation, good English |
 | SenseVoice Small | 155MB | Second opinion in the background (~0.1s per sentence) |
-| X-ASR streaming 480ms | 134MB | Live captions while recording |
 
 ## Pipeline
 
@@ -78,12 +71,11 @@ ASR (biased toward learned hotwords and English terms on screen) → formatting 
 ```
 voiceinput/
   app.py       tray, wiring, push-to-talk flow
-  hotkey.py    global hotkey (pynput; Windows low-level hook suppresses CapsLock)
+  hotkey.py    global hotkey, double tap (pynput; Windows low-level hook suppresses CapsLock)
   audio.py     microphone capture
-  asr.py       sherpa-onnx recognizers, hotword biasing, live captions
+  asr.py       sherpa-onnx recognizers, hotword biasing
   textfmt.py   final text formatting (incl. repeated-word removal)
-  session.py   what was just typed at the caret, undo, re-dictation
-  commands.py  voice commands without a selection
+  session.py   what was just typed at the caret, undo, learning from re-dictation and hand edits
   edit.py      voice edits on a selection
   suspects.py  second-opinion check for misheard words
   selection.py selection / on-screen terms via UI Automation
@@ -92,7 +84,7 @@ voiceinput/
   picker.py    candidate / suggestion menu
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log
-  output.py    clipboard paste, Backspace / Enter
+  output.py    clipboard paste, Delete / Backspace
   models.py    the fixed model set + downloader
   paths.py     app folder vs per-user data folder, legacy data migration
   autostart.py launch at login

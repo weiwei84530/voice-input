@@ -149,44 +149,45 @@ def caret_rect() -> tuple | None:
 class Context:
     selection: Selection | None = None
     terms: list[str] = field(default_factory=list)
-    app: str = ""
 
 
-def read_context(want_selection: bool, want_terms: bool) -> Context:
+def read_context() -> Context:
     """The focused app's selection (see read_selection) and the English terms visible in it."""
     ctx = Context()
     if sys.platform != "win32":
         return ctx
-    if want_selection:
-        ctx.selection = read_selection()
-    if want_terms:
-        try:
-            uia, U = _uia()
-            el = uia.GetFocusedElement()
-            ctx.app = _proc_name(el.CurrentProcessId)
-            pattern = el.GetCurrentPattern(U.UIA_TextPatternId)
-            if pattern:
-                pattern = pattern.QueryInterface(U.IUIAutomationTextPattern)
-                ranges = pattern.GetVisibleRanges()
-                text = "\n".join(ranges.GetElement(i).GetText(20000) for i in range(min(ranges.Length, 50)))
-                ctx.terms = terms_in(text)
-        except Exception:
-            log.exception("reading on-screen terms failed")
+    ctx.selection = read_selection()
+    ctx.terms = terms_in(visible_text())
     return ctx
+
+
+def visible_text() -> str:
+    """The text visible in the focused control (UI Automation TextPattern), "" if it has none."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        uia, U = _uia()
+        pattern = uia.GetFocusedElement().GetCurrentPattern(U.UIA_TextPatternId)
+        if not pattern:
+            return ""
+        ranges = pattern.QueryInterface(U.IUIAutomationTextPattern).GetVisibleRanges()
+        return "\n".join(ranges.GetElement(i).GetText(20000) for i in range(min(ranges.Length, 50)))
+    except Exception:
+        log.exception("reading the visible text failed")
+        return ""
 
 
 class ContextProbe:
     """Reads the selection and on-screen terms on a background thread so a slow app does not delay the
     recording start."""
 
-    def __init__(self, want_selection: bool, want_terms: bool):
+    def __init__(self):
         self._result = Context()
-        self._args = (want_selection, want_terms)
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def _run(self):
-        self._result = read_context(*self._args)
+        self._result = read_context()
 
     def result(self, timeout: float = 2.0) -> Context:
         self._thread.join(timeout)

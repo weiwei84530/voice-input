@@ -1,7 +1,8 @@
 """Small dark menu that never takes focus, so the target app keeps its caret and selection.
 
-Two uses: a list of choices (選字 candidates, a suspected mishearing, a context hotword question), picked by a click
-or by saying 第二個 / 對; and a yes/no box asking whether to add a hotword, answered only with the mouse (✓)."""
+Two uses: a list of choices (選字 candidates, a suspected mishearing, a context hotword question) and a yes/no box
+asking whether to add a hotword. Both are answered with the mouse only (decided 2026-09-29: short spoken answers
+like 對 / 第二個 were often misheard)."""
 import sys
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
@@ -15,6 +16,7 @@ QLabel#text { color: #f2f2f2; font-size: 14px; }
 QPushButton { color: #f2f2f2; background: transparent; border: none; border-radius: 5px;
               padding: 4px 10px; text-align: left; font-size: 15px; }
 QPushButton:hover { background: #3a3a44; }
+QPushButton#keep { color: #9a9aa2; font-size: 13px; }
 QPushButton#close { color: #9a9aa2; padding: 2px 6px; font-size: 12px; }
 QPushButton#tick { color: #7fd6a4; font-size: 16px; font-weight: bold; padding: 2px 10px; text-align: center; }
 QPushButton#tick:hover { background: #2c4a3a; }
@@ -25,6 +27,7 @@ _MAX_WIDTH = 360
 class Picker(QWidget):
     picked = Signal(int)      # 0-based row
     confirmed = Signal()      # ✓ clicked in a yes/no box
+    declined = Signal()       # the "keep" row clicked in a list
 
     def __init__(self):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -32,7 +35,6 @@ class Picker(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.candidates: list[str] = []
-        self.voice_pickable = False   # False for the yes/no box: speech never answers it
         self._timer = QTimer(self, singleShot=True, interval=30_000, timeout=self.hide)
 
         self.frame = QWidget(self, objectName="picker")
@@ -61,14 +63,18 @@ class Picker(QWidget):
 
     def show_candidates(self, word: str, candidates: list[str]):
         self.candidates = candidates
-        self._fill(f"選字：{word}　點選或說第幾個" if candidates else f"選字：{word}　找不到同音的候選", candidates)
+        self._fill(f"選字：{word}" if candidates else f"選字：{word}　找不到同音的候選", candidates)
         if self.isVisible():
             self._clamp()
 
-    def show_list(self, title: str, words: list[str], rect, timeout_ms: int = 30_000):
-        """A list of choices with its own title. rect as in _place; None puts it above the recording indicator."""
+    def show_list(self, title: str, words: list[str], rect, timeout_ms: int = 30_000, keep: str = ""):
+        """A list of choices with its own title. rect as in _place; None puts it above the recording indicator.
+        keep adds a last row that emits declined (e.g. 保留「城市」)."""
         self.candidates = words
         self._fill(title, words)
+        if keep:
+            self.rows.addWidget(QPushButton(keep, objectName="keep", clicked=self._decline))
+            self._shrink()
         self._timer.start(timeout_ms)
         self._place(rect, bottom=True)
 
@@ -84,7 +90,6 @@ class Picker(QWidget):
         h.addWidget(QPushButton("✓", objectName="tick", clicked=self._confirm))
         self.rows.addWidget(row)
         self._shrink()
-        self.voice_pickable = False
         self._timer.start(timeout_ms)
         self._place(rect, bottom=True)
 
@@ -112,14 +117,17 @@ class Picker(QWidget):
         self._clear()
         self.title.setText(title)
         for i, word in enumerate(candidates):
-            self.rows.addWidget(QPushButton(f"{i + 1}　{word}", clicked=lambda _=False, i=i: self._pick(i)))
-        self.voice_pickable = True
+            self.rows.addWidget(QPushButton(word, clicked=lambda _=False, i=i: self._pick(i)))
         self._shrink()
         self._timer.start(30_000)
 
     def _pick(self, i: int):
         self.hide()
         self.picked.emit(i)
+
+    def _decline(self):
+        self.hide()
+        self.declined.emit()
 
     def _confirm(self):
         self.hide()
