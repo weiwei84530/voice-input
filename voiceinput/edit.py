@@ -18,8 +18,11 @@ _CANDIDATE = [syllables(w) for w in ("選字", "換字", "改字")]
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:]+")
 _SPELLED_RAW = re.compile(r"^\s*[A-Za-z](?:[\s,，.。-]+[A-Za-z])+[\s,，.。]*$")
 _TRAILING = re.compile(r"[。，,.！？!?；;]+$")
-_CHANGE_TO = re.compile(r"^(?:請|幫我)?(?:把它|把這個|這個)?(?:改成|換成|改為|換為|變成|寫成)(.+)$")
-_INSTRUCT = re.compile(r"翻譯|翻成|改寫|重寫|潤飾|縮短|簡化|精簡|加上|加個|補上|去掉|拿掉|移除|大寫|小寫|口語|正式|語氣")
+_CHANGE_TO = re.compile(r"(?:改成|換成|改為|換為|變成|寫成)(.+)$")
+# Words that make an utterance an editing instruction rather than new text (decided 2026-09-29: cue words, not
+# an LLM classifier). Re-dictating a sentence that happens to contain one of them is sent to the LLM too.
+_INSTRUCT = re.compile(r"改|換|變成|翻譯|翻成|加上|加個|加一|補上|去掉|拿掉|移除|刪|寫成|寫得|一點|這句|這段|這行|"
+                       r"句號|逗號|問號|驚嘆號|頓號|引號|括號|標點|符號|大寫|小寫|語氣|禮貌|正式|口語|簡短|縮短|精簡|潤飾|通順")
 _ORDINALS = "一二三四五六七八九"
 _PICK = re.compile(rf"^(?:選)?第?([{_ORDINALS}兩1-9])(?:個|號)?$")
 
@@ -67,10 +70,13 @@ def plan(selected: str, raw: str, formatted: str) -> Edit:
         return Edit(REPLACE, match_case(word, selected), spelled=True)
     if spoken == _PUNCT.sub("", selected):
         return Edit(REPICK)
-    m = _CHANGE_TO.match(spoken)
+    m = _CHANGE_TO.search(spoken)
     if m and worth_learning(selected, m.group(1), False):
         return Edit(REPLACE, m.group(1))       # 改成程式: the 2B model echoes the instruction instead
-    if m or _INSTRUCT.search(spoken):
+    if re.search(r"[A-Za-z]", selected) and ("大寫" in spoken) != ("小寫" in spoken):
+        # 2B fails at this (returned the line unchanged); do it directly
+        return Edit(REPLACE, selected.upper() if "大寫" in spoken else selected.lower())
+    if _INSTRUCT.search(spoken):
         return Edit(INSTRUCT, formatted.strip())
     text = formatted.strip()
     if not _TRAILING.search(selected):

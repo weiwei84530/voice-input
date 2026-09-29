@@ -66,8 +66,13 @@ Plan agreed 2026-09-27. If text is selected when the hotkey goes down (`selectio
 read on a background thread), the utterance edits the selection instead of being pasted as new text (`edit.py`):
 刪除 → Delete key; 選字 → candidate menu; letters spelled one by one → that word, with the selection's capitalisation
 (Cloud + C L A U D E → Claude); saying the selected word again → auto-pick the best other candidate; 改成X → X when X
-sounds like the selection (2B echoes "改成程式" back instead of doing it), otherwise sentences with an editing verb
-(翻譯, 改寫, 加上 …) → LLM (`prompts/edit.txt`); anything else → replaces the selection. Commands are matched by fuzzy
+sounds like the selection (2B echoes "改成程式" back instead of doing it); 大寫/小寫 → done in code (2B failed);
+otherwise any cue word (改, 換, 加上, 去掉, 翻譯, 這句, 一點, 問號, 禮貌 … — `_INSTRUCT`, chosen by the user on
+2026-09-29 over an LLM classifier) → LLM (`prompts/edit.txt`); anything else → replaces the selection.
+2B often returns the whole line or Simplified text, so `instruct` strips the surrounding context and converts to
+Traditional. Tested 2026-09-29: 7/9 instructions right (politer, 句號改成問號, 加上請, 翻譯成英文, 後面加驚嘆號 …);
+"改成標點符號的點點點" and "改得正式一點" came back unchanged, which is reported as a failure and leaves the text alone.
+All LLM work (rank, judge, instruct, rewrite) shows the ring animation; the dots mean ASR only. Commands are matched by fuzzy
 pinyin because ASR hears 選字 as 選自. Terminals are excluded: pasting there inserts at the prompt cursor.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
 

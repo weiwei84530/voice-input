@@ -311,6 +311,7 @@ class App(QObject):
         server = self.llm
         if server is None:
             return False
+        self.rewriting.emit()   # any LLM work shows the ring, not the ASR dots
         ranked = server.rank(text[:start], text[end:], [text[start:end], value])
         log.info("hotword judge %s|%s: %s", text[start:end], value, [(c, round(p, 2)) for p, c in ranked])
         return ranked[0][1] == value
@@ -321,6 +322,7 @@ class App(QObject):
         server = self.llm
         if server is None or not words:
             return words
+        self.rewriting.emit()
         t0 = time.monotonic()
         ranked = server.rank(sel.before, sel.after, [sel.text] + words)
         log.info("rank %.2fs %s: %s", time.monotonic() - t0, sel.text, [(c, round(p, 2)) for p, c in ranked])

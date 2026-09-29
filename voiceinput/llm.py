@@ -15,6 +15,7 @@ from pathlib import Path
 from . import models
 from .models import fetch
 from .paths import APP_DIR, LLAMA_LOG_PATH
+from .textfmt import to_traditional
 
 LLAMA_TAG = "b11195"
 LLAMA_DIR = APP_DIR / ".tools" / "llama"
@@ -180,8 +181,15 @@ class LlmServer:
         """Rewrite the selected text as the spoken instruction asks (e.g. 翻譯成英文). Returns selected on failure."""
         prompt = render("edit", before=before, selected=selected, after=after, instruction=instruction)
         out = self._chat([{"role": "user", "content": prompt}], len(selected) * 3 + 48)["message"]["content"]
-        out = out.strip().strip("【】「」\"")
-        if not out or len(out) > len(selected) * 4 + 40:
+        out = to_traditional(out.strip().strip("【】[]\"'"))   # not 「」: "加上引號" must keep them
+        # 2B often returns the whole line; keep only the part that replaces the selection
+        if before.strip() and out.startswith(before):
+            out = out[len(before):]
+        if after.strip() and out.endswith(after):
+            out = out[:-len(after)]
+        out = out.strip()
+        # Guard: rambling, or the instruction copied into the result instead of carried out
+        if not out or len(out) > len(selected) * 4 + 40 or instruction.strip("。！？") in out:
             return selected
         return out
 
