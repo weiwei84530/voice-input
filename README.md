@@ -27,9 +27,10 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
-- Left-click the tray icon to open settings (speech model, models folder, microphone, hotkey, trailing punctuation removal, launch at login, LLM custom rules)
-  and shows a per-utterance log (ASR / formatted / LLM) for this session. Changes apply immediately.
-- If the model is missing it is downloaded automatically on launch (progress shown in settings / tray tooltip).
+- Left-click the tray icon to open settings (models folder, microphone, hotkey, trailing punctuation removal, launch at
+  login, voice commands, live captions, second opinion, on-screen terms, hotwords) and a per-utterance log for this
+  session. Changes apply immediately.
+- Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 - Live captions appear above the indicator while you speak (streaming X-ASR, display only).
 
 ## Editing by voice
@@ -46,32 +47,31 @@ What you just dictated can be changed without selecting it, as long as you have 
 | 換行 / 送出 | Shift+Enter / Enter; "…（pause）送出" at the end of a sentence pastes and sends |
 | 不要記 | forget the hotword just learned |
 
-With text selected: 刪除, 選字 (candidate menu), a new word, spelled letters, 教育的育, or an instruction (翻譯成英文).
-After a dictation a small menu may offer a likely misheard word (a second model heard it differently): say 對 or
-第幾個. Corrections are learned as hotwords, including a sentence deleted and said again.
+With text selected: 刪除, 選字 (candidate menu), a new word, 改成X, spelled letters, 教育的育, 大寫 / 小寫, or a
+punctuation name.
+After a dictation a small menu may offer a likely misheard word (a second model heard it differently), or ask whether
+a learned correction applies here (「城市」要換成「程式」嗎): say 對, 第幾個 or 不用. Corrections are learned as hotwords,
+including a sentence deleted and said again; a hotword remembers the words around it to decide next time.
 
 ## Models
 
-Selectable in settings; a model that isn't downloaded yet is fetched automatically when selected.
+Fixed, all [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models, ~420MB in total, no LLM:
 
-| Model | Size | 18s audio (CPU) | Notes |
-|---|---|---|---|
-| X-ASR (default) | 130MB | ~0.75s | Punctuation, good English |
-| SenseVoice Small | 155MB | ~0.8s | Punctuation, numbers as digits, weaker English |
-| Qwen3-ASR 0.6B | 840MB | ~4.4s | Most accurate |
-| Fun-ASR-Nano (fp16) | 1GB | ~7.5s | The int8 build returns empty output on some CPUs |
+| Model | Size | Role |
+|---|---|---|
+| X-ASR int8 | 130MB | Recognition (~0.75s for 18s of audio on CPU); punctuation, good English |
+| SenseVoice Small | 155MB | Second opinion in the background (~0.1s per sentence) |
+| X-ASR streaming 480ms | 134MB | Live captions while recording |
 
 ## Pipeline
 
-ASR → formatting (`textfmt.py`) → optional LLM custom rules → paste.
+ASR (biased toward learned hotwords and English terms on screen) → formatting (`textfmt.py`) → hotwords → paste.
 
-- **LLM custom rules** (off by default): Qwen3.5 2B (Q4_K_M GGUF) served by a local `llama-server`
-  (llama.cpp, CPU build in `.tools/llama`), downloaded and loaded only while enabled. It applies only the rules
-  typed in settings and leaves everything else unchanged; with no rules it is skipped.
-  Timings are written to `voiceinput.log`.
-- **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), multi-character Chinese numerals → digits
-  (single-character ones like 一個 / 兩個 stay), 百分之X / X percent → X%, 嗯 / 呃 removed, spelled letters joined (A P I → API), 點 between digits/letters → `.`,
-  half-width punctuation inside English, a space between CJK and English/digits, optional trailing punctuation removal.
+- **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), repeated words and restarts removed
+  (我們我們, 先打開那個，先打開設定頁), multi-character Chinese numerals → digits (single-character ones like 一個 / 兩個
+  stay), 百分之X / X percent → X%, 嗯 / 呃 removed, spelled letters joined (A P I → API), 點 between digits/letters →
+  `.`, half-width punctuation inside English, a space between CJK and English/digits, optional trailing punctuation
+  removal.
 
 ## Layout
 
@@ -80,8 +80,7 @@ voiceinput/
   app.py       tray, wiring, push-to-talk flow
   hotkey.py    global hotkey (pynput; Windows low-level hook suppresses CapsLock)
   audio.py     microphone capture
-  asr.py       sherpa-onnx recognizers
-  llm.py       llama-server lifecycle + custom-rule rewrite
+  asr.py       sherpa-onnx recognizers, hotword biasing, live captions
   textfmt.py   final text formatting (incl. repeated-word removal)
   session.py   what was just typed at the caret, undo, re-dictation
   commands.py  voice commands without a selection
@@ -94,7 +93,11 @@ voiceinput/
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log
   output.py    clipboard paste, Backspace / Enter
-  models.py    ASR model registry + downloader
+  models.py    the fixed model set + downloader
   paths.py     app folder vs per-user data folder, legacy data migration
   autostart.py launch at login
+dev/
+  headless.py  end-to-end test with TTS audio against a simulated text box
+  e2e.py       the same against a real Notepad / Windows Terminal window
+  tts.ps1      Windows zh-TW TTS to 16kHz wav
 ```

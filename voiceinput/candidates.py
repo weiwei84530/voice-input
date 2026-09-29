@@ -2,8 +2,8 @@
 
 Candidates come from jieba's word list (349k words with frequencies) indexed by fuzzy toneless pinyin, so
 Taiwanese-accent confusions (zh/z, ch/c, sh/s, ing/in, eng/en, ang/an, l/n) still match. The index takes ~13s to
-build, so it is cached in DATA_DIR/cache and built in the background at startup. Ranking by context is done by the
-LLM (llm.LlmServer.rank); here words are only ordered by exact-pinyin match, then frequency.
+build, so it is cached in DATA_DIR/cache and built in the background at startup. Words are ordered by exact-pinyin
+match, then frequency; the app puts the second model's version and learned hotwords in front.
 """
 import importlib.util
 import logging
@@ -20,13 +20,13 @@ from .textfmt import to_traditional
 log = logging.getLogger("voiceinput")
 
 _CACHE = DATA_DIR / "cache" / "pinyin_index.pkl"
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 _CJK = re.compile(r"^[㐀-䶿一-鿿]+$")
 _FUZZY = [("zh", "z"), ("ch", "c"), ("sh", "s"), ("ing", "in"), ("eng", "en"), ("ang", "an")]
 _MIN_FREQ = 3            # jieba's floor; rarer entries are mostly noise
 
 _index: dict[str, list[tuple[str, int]]] | None = None
-_pos: dict[str, str] = {}   # jieba POS tag of 2-4 character words (Simplified), used by textfmt's disfluency pass
+_words: dict[str, tuple[str, int]] = {}   # 2-4 character words (Simplified) -> (jieba POS tag, frequency)
 _lock = threading.Lock()
 
 
@@ -48,7 +48,7 @@ def _dict_path() -> Path:
 
 def _build() -> tuple[dict, dict]:
     index: dict[str, list[tuple[str, int]]] = {}
-    pos: dict[str, str] = {}
+    words: dict[str, tuple[str, int]] = {}
     with open(_dict_path(), encoding="utf-8") as f:
         for line in f:
             parts = line.split()
@@ -58,30 +58,30 @@ def _build() -> tuple[dict, dict]:
             if len(word) > 4 or freq < _MIN_FREQ or not _CJK.match(word):
                 continue
             index.setdefault(" ".join(syllables(word)), []).append((word, freq))
-            if len(word) >= 2 and len(parts) > 2:
-                pos[word] = parts[2]
-    for words in index.values():
-        words.sort(key=lambda wf: -wf[1])
-    return index, pos
+            if len(word) >= 2:
+                words[word] = (parts[2] if len(parts) > 2 else "x", freq)
+    for same in index.values():
+        same.sort(key=lambda wf: -wf[1])
+    return index, words
 
 
 def load() -> dict:
     """The pinyin index, built (and cached) on first use. Safe to call from any thread."""
-    global _index, _pos
+    global _index, _words
     with _lock:
         if _index is None:
             try:
-                version, index, pos = pickle.loads(_CACHE.read_bytes())
+                version, index, words = pickle.loads(_CACHE.read_bytes())
                 if version == _CACHE_VERSION:
-                    _index, _pos = index, pos
+                    _index, _words = index, words
             except (OSError, ValueError, pickle.PickleError, EOFError):
                 pass
             if _index is None:
                 log.info("building pinyin index…")
-                index, pos = _build()
+                index, words = _build()
                 _CACHE.parent.mkdir(parents=True, exist_ok=True)
-                _CACHE.write_bytes(pickle.dumps((_CACHE_VERSION, index, pos)))
-                _pos, _index = pos, index
+                _CACHE.write_bytes(pickle.dumps((_CACHE_VERSION, index, words)))
+                _words, _index = words, index
                 log.info("pinyin index: %d keys", len(_index))
         return _index
 
@@ -92,7 +92,13 @@ def pos_tag(word: str) -> str | None:
     if _index is None:
         return None
     from .textfmt import to_simplified
-    return _pos.get(to_simplified(word), "")
+    return _words.get(to_simplified(word), ("", 0))[0]
+
+
+def frequency(word: str) -> int:
+    """jieba frequency of a 2-4 character word (0 if unknown or still loading)."""
+    from .textfmt import to_simplified
+    return _words.get(to_simplified(word), ("", 0))[1]
 
 
 def preload() -> None:

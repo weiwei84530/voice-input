@@ -76,9 +76,9 @@ def say(name, wait=6.0):
 t0 = time.monotonic()
 while time.monotonic() - t0 < 180:
     pump(0.5)
-    if A.recognizer and A.llm and (A.second or not A.cfg.second_opinion) and (A.preview or not A.cfg.live_caption):
+    if A.recognizer and (A.second or not A.cfg.second_opinion) and (A.preview or not A.cfg.live_caption):
         break
-print(f"loaded in {time.monotonic() - t0:.1f}s: asr={bool(A.recognizer)} llm={bool(A.llm)} second={bool(A.second)} "
+print(f"loaded in {time.monotonic() - t0:.1f}s: asr={bool(A.recognizer)} second={bool(A.second)} "
       f"preview={bool(A.preview)}")
 
 def windows(cls):
@@ -144,7 +144,7 @@ for step in sys.argv[3].split(","):
 
 import os  # noqa: E402
 out = subprocess.run(["powershell", "-NoProfile", "-Command",
-                      "(Get-Process -Id %d).WorkingSet64/1MB; (Get-Process llama-server).WorkingSet64/1MB" % os.getpid()],
+                      "(Get-Process -Id %d).WorkingSet64/1MB" % os.getpid()],
                      capture_output=True, text=True)
-print("memory MB (app, llama):", out.stdout.split())
+print("memory MB:", out.stdout.split())
 A.quit()

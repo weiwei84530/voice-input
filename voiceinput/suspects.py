@@ -1,26 +1,20 @@
 """Find words in a dictation that were probably misheard, so the app can offer a fix without the user having
 to spot and select them.
 
-A word is suspect when a second ASR model (SenseVoice) heard something different there and the LLM, asked to
-choose between the two for this sentence, gives the second model's version a fair share. Asking the LLM alone is useless:
-scanning 80 of the user's real utterances for homophones it prefers flagged only correct words (就是 -> 就勢 0.79,
-想要 -> 先要 0.93; tested 2026-09-29). X-ASR token confidences were tried as a second signal and dropped for the
-same reason: without the second model's version the LLM has to pick among dictionary homophones.
+A word is suspect when a second ASR model (SenseVoice) heard something different there and its version is the
+likelier word: a dictionary word where the typed one is not (主機版 / 主機板), or at least _FREQ_RATIO times more
+common. Both models often share an error, so this fires rarely; it never guesses from the dictionary alone.
+Context hotwords that could not decide (hotwords.Ask) are offered through the same menu.
 """
 import difflib
-import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import candidates
 
-log = logging.getLogger("voiceinput")
-
 _CJK = re.compile(r"[㐀-䶿一-鿿]")
 _KEEP = re.compile(r"[㐀-䶿一-鿿A-Za-z0-9]")
-# Offer the second model's version when the LLM gives it at least this share. A wrong offer is cheap (a small
-# menu that closes by itself or on the next utterance); 2B leans to mainland wording (函數 0.71 over 函式).
-_OFFER_P = 0.25
+_FREQ_RATIO = 20
 
 
 @dataclass
@@ -29,6 +23,8 @@ class Suspect:
     end: int
     word: str
     options: list[str]     # best first
+    hotword: object = None                       # set when offered for a context hotword (hotwords.Ask)
+    words: list = field(default_factory=list)    # that sentence's context words
 
 
 def _normalized(text: str) -> tuple[str, list[int]]:
@@ -64,17 +60,18 @@ def _word_around(text: str, start: int, end: int) -> tuple[int, int]:
     return start, end
 
 
-def find(text: str, other: str | None, rank) -> list[Suspect]:
-    """rank(before, after, options) -> [(p, option)] best first, or None when the LLM is not running."""
+def likelier(alt: str, word: str) -> bool:
+    """alt is a dictionary word and word is not, or alt is much more common."""
+    fa, fw = candidates.frequency(alt), candidates.frequency(word)
+    return fa > 0 and (fw == 0 or fa >= fw * _FREQ_RATIO)
+
+
+def find(text: str, other: str | None) -> list[Suspect]:
     out = []
     for s, e, alt in disagreements(text, other or ""):
         s2, e2 = _word_around(text, s, e)
         word, alt_word = text[s2:e2], text[s2:s] + alt + text[e:e2]
-        if rank is None:
-            continue
-        duel = rank(text[:s2], text[e2:], [word, alt_word])
-        log.info("suspect %s|%s: %s", word, alt_word, [(c, round(p, 2)) for p, c in duel])
-        if dict((c, p) for p, c in duel).get(alt_word, 0) < _OFFER_P:
+        if not likelier(alt_word, word):
             continue
         options = [alt_word] + [h for h in candidates.homophones(word) if h != alt_word][:2]
         out.append(Suspect(s2, e2, word, options))

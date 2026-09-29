@@ -7,50 +7,31 @@ from pathlib import Path
 
 from .paths import DEFAULT_MODELS_DIR
 
-LLM_SUBDIR = "llm"   # the LLM's GGUF lives in <models dir>/llm
 BASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
 
-# Order here is the order shown in the settings dropdown.
-# "files" are the paths that must exist for the model to count as installed.
+# Fixed set (decided 2026-09-29: the app stays light, no model choice). "files" are the paths that must exist for
+# the model to count as installed.
+MAIN_MODEL = "xasr"            # recognition
+SECOND_MODEL = "sensevoice"    # second opinion for suspects and 選字
+STREAM_MODEL = "xasr_stream"   # live captions while recording
 MODELS = {
-    "xasr": {
-        "label": "X-ASR（最快最輕，英文佳，~130MB）",
+    MAIN_MODEL: {
         "short": "X-ASR",
         "dir": "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03",
         "files": ["encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx",
                   "joiner-epoch-99-avg-1.int8.onnx", "tokens.txt", "bpe.model"],
     },
-    "sensevoice": {
-        "label": "SenseVoice Small（快，英文較弱，~160MB）",
+    SECOND_MODEL: {
         "short": "SenseVoice",
         "dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
         "files": ["model.int8.onnx", "tokens.txt"],
     },
-    "qwen3_asr": {
-        "label": "Qwen3-ASR 0.6B（最準，約慢 5 倍，~840MB）",
-        "short": "Qwen3-ASR",
-        "dir": "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
-        "files": ["conv_frontend.onnx", "encoder.int8.onnx", "decoder.int8.onnx", "tokenizer"],
-    },
-    "funasr_nano": {
-        "label": "Fun-ASR-Nano（最慢，~1GB）",
-        "short": "Fun-ASR-Nano",
-        "dir": "sherpa-onnx-funasr-nano-fp16-2025-12-30",
-        "files": ["encoder_adaptor.int8.onnx", "llm.fp16.onnx", "embedding.int8.onnx", "Qwen3-0.6B"],
-    },
-}
-DEFAULT_MODEL = "xasr"
-
-# Not selectable: used alongside the chosen model
-STREAM_MODEL = "xasr_stream"
-AUX_MODELS = {
-    STREAM_MODEL: {   # live captions while recording
+    STREAM_MODEL: {
         "short": "X-ASR streaming",
         "dir": "sherpa-onnx-x-asr-480ms-streaming-zipformer-transducer-zh-en-punct-int8-2026-06-05",
         "files": ["encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt"],
     },
 }
-_ALL = {**MODELS, **AUX_MODELS}
 
 
 _models_dir = DEFAULT_MODELS_DIR
@@ -67,7 +48,7 @@ def set_models_dir(path: Path) -> None:
 
 def is_subfolder(path: Path, parent: Path) -> bool:
     """True if path lies strictly inside parent. Moving the models there would move folders into themselves
-    (e.g. choosing <models>/llm moved the ASR models into llm/ and left duplicates behind)."""
+    (e.g. choosing a subfolder moved the models into it and left duplicates behind)."""
     path, parent = path.resolve(), parent.resolve()
     return path != parent and path.is_relative_to(parent)
 
@@ -79,7 +60,7 @@ def move_models_dir(new: Path) -> None:
     if is_subfolder(new, old):
         raise ValueError("新的模型資料夾不能在目前的模型資料夾裡面")
     new.mkdir(parents=True, exist_ok=True)
-    for name in [m["dir"] for m in _ALL.values()] + [LLM_SUBDIR]:
+    for name in [m["dir"] for m in MODELS.values()]:
         src, dst = old / name, new / name
         if src.exists() and not dst.exists():
             shutil.move(src, dst)
@@ -87,12 +68,12 @@ def move_models_dir(new: Path) -> None:
 
 
 def model_dir(key: str) -> Path:
-    return _models_dir / _ALL[key]["dir"]
+    return _models_dir / MODELS[key]["dir"]
 
 
 def is_installed(key: str) -> bool:
     d = model_dir(key)
-    return all((d / f).exists() for f in _ALL[key]["files"])
+    return all((d / f).exists() for f in MODELS[key]["files"])
 
 
 def fetch(url: str, dest: Path, progress=None) -> None:
@@ -114,7 +95,7 @@ def download(key: str, progress=None) -> None:
     """Download and extract a model. progress(done_bytes, total_bytes) is optional."""
     if is_installed(key):
         return
-    name = _ALL[key]["dir"] + ".tar.bz2"
+    name = MODELS[key]["dir"] + ".tar.bz2"
     archive = _models_dir / name
     fetch(BASE_URL + name, archive, progress)
     with tarfile.open(archive, "r:bz2") as tar:
@@ -138,11 +119,11 @@ if __name__ == "__main__":
     from .paths import migrate_legacy
     migrate_legacy()
     set_models_dir(Config.load().models_path())
-    keys = sys.argv[1:] or [DEFAULT_MODEL]
+    keys = sys.argv[1:] or list(MODELS)
     for k in keys:
         if is_installed(k):
             print(f"[{k}] already installed")
             continue
-        print(f"[{k}] downloading {_ALL[k]['dir']} ...")
+        print(f"[{k}] downloading {MODELS[k]['dir']} ...")
         download(k, _cli_progress)
         print(f"\n[{k}] done")

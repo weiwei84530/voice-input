@@ -1,4 +1,4 @@
-"""Text formatting applied to every result (after ASR, before the optional LLM pass)."""
+"""Text formatting applied to every result (after ASR, before hotwords)."""
 import re
 
 import opencc
@@ -56,7 +56,6 @@ _TRAILING_PUNCT = re.compile(r"[。，,.]+$")
 _FILLER = re.compile(r"[嗯呃]+[，,、。]?\s*")
 
 # Disfluencies (2026-09-29, from the user's log: 我們我們明天見, 你可不可不可以, 今天今天, 先打開那個，先打開設定頁).
-# The LLM rule fixed some of these at ~1.4s per sentence; these cover the common shapes for free.
 # Repeated 2-4 character chunks are removed unless they are ABAB reduplication (研究研究, 討論討論: verbs and
 # adjectives by jieba's POS tags), counting (一個一個) or laughter-like (哈哈哈哈).
 _REPEAT = re.compile(rf"([{CJK}]{{2,4}})\1")

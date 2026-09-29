@@ -5,13 +5,15 @@ What an utterance does, in order:
 2. Text is selected (UI Automation): the utterance edits the selection (edit.py).
 3. A voice command (commands.py): 復原, 送出, 換行, 刪掉上一句, 城市改成程式 … on what was just dictated
    (session.py), without selecting anything.
-4. Otherwise it is dictated: formatted, optional LLM rules, pasted; a trailing 送出 after a pause presses Enter.
-   In the background a second model re-checks it and a likely misheard word is offered in a small menu.
+4. Otherwise it is dictated: formatted, hotwords applied, pasted; a trailing 送出 after a pause presses Enter.
+   A context hotword that could not decide, or a word the second model heard differently, is offered in a menu.
+
+Models are fixed (models.py): X-ASR recognises, SenseVoice gives a second opinion, streaming X-ASR shows captions.
+There is no LLM (removed 2026-09-29 to keep the app light).
 """
 import logging
 import re
 import sys
-import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -21,12 +23,12 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, commands, edit, llm, models, paths, suspects
+from . import autostart, candidates, commands, edit, models, paths, suspects
 from .asr import Recognizer, StreamingPreview
 from .audio import Recorder
 from .config import Config
 from .hotkey import TAP_THRESHOLD, PushToTalk
-from .hotwords import HotwordStore, worth_learning
+from .hotwords import HotwordStore, context_words, worth_learning
 from .output import backspace, paste_text, press_delete, press_enter, press_newline
 from .overlay import Overlay
 from .picker import Picker
@@ -65,13 +67,11 @@ class App(QObject):
     released = Signal(float)
     main = Signal(object)                    # run a callable on the Qt main thread (keystrokes, clipboard, UI)
     edited = Signal(object, object, str)     # Selection, edit.Edit, log text: a voice edit on selected text
-    candidates_ready = Signal(object, list)  # Selection, ranked candidates for the 選字 menu
+    candidates_ready = Signal(object, list)  # Selection, candidates for the 選字 menu
     suspects_ready = Signal(object, list)    # Utterance, [suspects.Suspect]
-    menu_voice = Signal(int)                 # row picked by voice (-1 = close and go on, -2 = just close)
-    rewriting = Signal()
+    menu_voice = Signal(int)                 # row picked by voice (-1 = close and go on, -2 = declined)
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
-    llm_status = Signal(str, str)  # state (off / loading / ready / error), text
     models_moved = Signal()
 
     def __init__(self, qapp: QApplication):
@@ -85,21 +85,16 @@ class App(QObject):
         self.preview: StreamingPreview | None = None  # live captions
         self.recording = False
         self.worker = ThreadPoolExecutor(max_workers=1)   # serializes model loads and transcription
-        self.bg = ThreadPoolExecutor(max_workers=1)       # second opinion, suspects, aux model loads
+        self.bg = ThreadPoolExecutor(max_workers=1)       # second opinion, aux model loads
         self._status_text = ""
-        self._llm_status_text = ""
-        self._llm_state = ("off", "")
         self._records = deque(maxlen=100)       # transcript log, kept for this session only
-        self.llm: llm.LlmServer | None = None
-        self._llm_wanted = None
-        self._llm_gen = 0                       # bumps on every enable/disable; stale loads discard themselves
-        self._llm_lock = threading.Lock()       # serializes LLM downloads / server starts
         self.hotwords = HotwordStore()
         self.session = Session()
         self._recent = deque(maxlen=10)         # recent dictations (for 選字 second opinions)
         self._probe: ContextProbe | None = None
         self._menu_open = False
-        self._menu = None                       # ("candidates", Selection) or ("suspect", Utterance, Suspect)
+        # ("candidates", Selection) | ("span", start, end, word) | ("suspect", Utterance, Suspect)
+        self._menu = None
         self._undo = None                       # hotword the last "learned" notification can undo (click)
         self._learned = None                    # last learned hotword ("不要記")
         self._caption_raw = ""
@@ -133,19 +128,16 @@ class App(QObject):
         self.candidates_ready.connect(self.on_candidates)
         self.suspects_ready.connect(self.on_suspects)
         self.menu_voice.connect(self.on_menu_voice)
-        self.rewriting.connect(self.overlay.show_rewriting)
         self.status.connect(self.on_status)
-        self.llm_status.connect(self.on_llm_status)
         self.record.connect(self.on_record)
-        self.models_moved.connect(self.load_llm)
+        self.models_moved.connect(self.load_aux)
 
         self.ptt = PushToTalk(self.cfg.hotkey, self.pressed.emit, self.released.emit, self.session.on_key)
         self.ptt.start()
         self._mouse = self._watch_mouse()
-        self.load_model(self.cfg.model if self.cfg.model in models.MODELS else models.DEFAULT_MODEL)
-        self.load_llm()
+        self.load_model()
         self.load_aux()
-        candidates.preload()   # 選字, suspects and the disfluency pass use the dictionary
+        candidates.preload()   # 選字, suspects, hotword contexts and the disfluency pass use the dictionary
         if self.cfg.autostart:
             self._set_autostart()   # re-register so the entry follows the app if its folder was moved
 
@@ -178,12 +170,12 @@ class App(QObject):
         return listener
 
     # --- models ---
-    def load_model(self, key: str):
-        self._model_key = key
+    def load_model(self):
         self.recognizer = None
-        self.worker.submit(self._load_model_job, key)
+        self.worker.submit(self._load_model_job)
 
-    def _load_model_job(self, key: str):
+    def _load_model_job(self):
+        key = models.MAIN_MODEL
         try:
             if not models.is_installed(key):
                 def progress(done, total):
@@ -191,120 +183,56 @@ class App(QObject):
                     self.status.emit(f"下載模型中… {pct}")
                 models.download(key, progress)
             self.status.emit("載入模型中…")
-            rec = Recognizer(key)
-            if key == self.cfg.model:   # ignore a load the user already switched away from
-                self.recognizer = rec
-                self.status.emit(f"就緒：{models.MODELS[key]['short']}")
+            self.recognizer = Recognizer(key)
+            self.status.emit("就緒")
         except Exception as e:
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
-
-    def _second_key(self) -> str:
-        # SenseVoice, not Qwen3-ASR: as a disagreement signal (filtered by the LLM) it is enough, and it takes
-        # 0.1s and ~200MB instead of ~1s and ~1.2GB (tested 2026-09-29; the app reached 1.8GB with Qwen3 on an
-        # 8GB machine that also runs the 2B LLM)
-        return "sensevoice" if self._model_key != "sensevoice" else "xasr"
 
     def load_aux(self):
         """Load or drop the live-caption and second-opinion models to match the settings."""
         self.bg.submit(self._load_aux_job)
 
     def _load_aux_job(self):
-        try:
-            if self.cfg.live_caption and self.preview is None:
-                if not models.is_installed(models.STREAM_MODEL):
-                    models.download(models.STREAM_MODEL)
-                t0 = time.monotonic()
-                self.preview = StreamingPreview(models.model_dir(models.STREAM_MODEL))
-                log.info("live caption model loaded in %.1fs", time.monotonic() - t0)
-            elif not self.cfg.live_caption:
-                self.preview = None
-        except Exception:
-            log.exception("live caption model failed")
-        try:
-            key = self._second_key()
-            if self.cfg.second_opinion and (self.second is None or self.second.key != key):
+        for key, wanted, attr, make in (
+                (models.STREAM_MODEL, self.cfg.live_caption, "preview",
+                 lambda: StreamingPreview(models.model_dir(models.STREAM_MODEL))),
+                (models.SECOND_MODEL, self.cfg.second_opinion, "second", lambda: Recognizer(models.SECOND_MODEL))):
+            try:
+                if not wanted:
+                    setattr(self, attr, None)
+                    continue
+                if getattr(self, attr) is not None:
+                    continue
                 if not models.is_installed(key):
-                    log.info("second opinion: %s not installed, skipped", key)
-                    self.second = None
-                    return
+                    models.download(key)
                 t0 = time.monotonic()
-                self.second = Recognizer(key)
-                log.info("second opinion model %s loaded in %.1fs", key, time.monotonic() - t0)
-            elif not self.cfg.second_opinion:
-                self.second = None
-        except Exception:
-            log.exception("second opinion model failed")
+                setattr(self, attr, make())
+                log.info("%s loaded in %.1fs", key, time.monotonic() - t0)
+            except Exception:
+                log.exception("%s failed to load", key)
 
     def change_models_dir(self, path: str):
-        """Move the downloaded models to path (empty = default folder), then reload the ASR model and LLM."""
+        """Move the downloaded models to path (empty = default folder), then reload them."""
         new = Path(path) if path else paths.DEFAULT_MODELS_DIR
         if new.resolve() == models.models_dir().resolve():
             return
         self.recognizer = None
         self.second = self.preview = None
-        # Stop the LLM (its GGUF is held open) and keep it stopped until the move is done
-        self._llm_wanted = None
-        self._llm_gen += 1
-        old_llm, self.llm = self.llm, None
-        self.llm_status.emit("off", "")
-        self.worker.submit(self._move_models_job, new, old_llm)
+        self.worker.submit(self._move_models_job, new)
 
-    def _move_models_job(self, new: Path, old_llm):
-        with self._llm_lock:
-            if old_llm:
-                old_llm.close()
-            self.status.emit("搬移模型中…")
-            try:
-                models.move_models_dir(new)
-                self.cfg.models_dir = "" if new == paths.DEFAULT_MODELS_DIR else str(new)
-                self.cfg.save()
-                log.info("models dir: %s", new)
-            except Exception as e:
-                log.exception("moving models failed")
-                self.status.emit(f"搬移模型失敗：{e}")
-        self._load_model_job(self._model_key)
+    def _move_models_job(self, new: Path):
+        self.status.emit("搬移模型中…")
+        try:
+            models.move_models_dir(new)
+            self.cfg.models_dir = "" if new == paths.DEFAULT_MODELS_DIR else str(new)
+            self.cfg.save()
+            log.info("models dir: %s", new)
+        except Exception as e:
+            log.exception("moving models failed")
+            self.status.emit(f"搬移模型失敗：{e}")
+        self._load_model_job()
         self.models_moved.emit()
-        self.load_aux()
-
-    def load_llm(self):
-        """Start or stop the LLM server: it runs while custom rules, voice edits or the second opinion are on
-        (candidate ranking, context hotwords, suspects and spoken edit instructions need it)."""
-        wanted = self.cfg.llm_enabled or self.cfg.edit_enabled or self.cfg.second_opinion
-        if wanted == self._llm_wanted:
-            return
-        self._llm_wanted = wanted
-        self._llm_gen += 1
-        old, self.llm = self.llm, None
-        threading.Thread(target=self._load_llm_job, args=(self._llm_gen, wanted, old), daemon=True).start()
-
-    def _load_llm_job(self, gen, wanted, old):
-        with self._llm_lock:
-            if old:
-                old.close()
-            if gen != self._llm_gen:
-                return
-            if not wanted:
-                self.llm_status.emit("off", "")
-                return
-            try:
-                if not llm.is_installed():
-                    def progress(done, total):
-                        pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
-                        self.llm_status.emit("loading", f"模型下載中… {pct}")
-                    llm.download(progress)
-                self.llm_status.emit("loading", "模型載入中…")
-                t0 = time.monotonic()
-                server = llm.LlmServer(self.cfg.llm_user_rules if self.cfg.llm_enabled else "")
-                log.info("llm loaded in %.1fs", time.monotonic() - t0)
-                if gen != self._llm_gen:
-                    server.close()
-                    return
-                self.llm = server
-                self.llm_status.emit("ready", "已就緒")
-            except Exception as e:
-                log.exception("llm load failed")
-                self.llm_status.emit("error", f"載入失敗：{e}")
 
     # --- push-to-talk ---
     def _caption_text(self) -> str:
@@ -331,8 +259,7 @@ class App(QObject):
             preview.start()
         self.recording = True
         self._caption_raw = self._caption = ""
-        want_terms = self.cfg.screen_terms and self.recognizer.supports_hotwords
-        self._probe = ContextProbe(self.cfg.edit_enabled, want_terms)
+        self._probe = ContextProbe(self.cfg.edit_enabled, self.cfg.screen_terms)
         self._menu_open = self.picker.isVisible()
         self._hwnd = foreground()
         self.tray.setIcon(self.icon_rec)
@@ -360,27 +287,23 @@ class App(QObject):
         try:
             ctx = probe.result() if probe else Context()
             t0 = time.monotonic()
-            tr = rec.recognize(audio, self._bias(ctx) if rec.supports_hotwords else None)
+            tr = rec.recognize(audio, self._bias(ctx))
             t_asr = time.monotonic() - t0
-            text = tr.text
-            log.info("asr %.2fs: %s%s", t_asr, text, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
-            entry = {"time": stamp, "asr": to_traditional(text), "asr_s": t_asr, "llm": "", "llm_s": None}
-            # Format before the LLM so it sees Traditional Chinese, joined letters and digits, matching how the
-            # user writes rules. No formatting after it: that would override rules such as "add a trailing period".
-            raw = text
-            text = self.hotwords.apply(format_text(text, self.cfg.strip_trailing_punct), self._judge)
+            raw = tr.text
+            log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
+            entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr}
+            text, asks = self.hotwords.apply(format_text(raw, self.cfg.strip_trailing_punct))
             entry["fmt"] = text
             if menu_open:
                 row = edit.parse_pick(text)
                 self.menu_voice.emit(row)
                 if row >= 0 or row == -2:
-                    entry.update(llm=None, edit=f"選第 {row + 1} 個" if row >= 0 else "關閉選單")
+                    entry["edit"] = f"選第 {row + 1} 個" if row >= 0 else "不用"
                     self.record.emit(entry)
                     self.main.emit(self.overlay.hide_overlay)
                     return
             sel = ctx.selection
             if sel is not None:
-                entry["llm"] = None
                 self._edit_job(sel, raw, text, entry, hwnd)
                 return
             cmd = commands.parse(raw, text, tr) if self.cfg.voice_commands else commands.Command(commands.DICTATE, text)
@@ -388,48 +311,19 @@ class App(QObject):
                 if self._command_job(cmd, entry, hwnd):
                     return
                 cmd = commands.dictation(raw, text, tr)
-            text = cmd.text
-            server, rules = self.llm, self.cfg.llm_user_rules.strip()
-            if not self.cfg.llm_enabled:
-                entry["llm"] = None  # hidden in the log
-            elif not rules:
-                entry["llm"] = "（規則空白，略過）"
-            elif server is None:
-                entry["llm"] = "（模型尚未就緒，略過）"
-            elif not text:
-                entry["llm"] = "（沒有文字）"
-            else:
-                self.rewriting.emit()
-                t1 = time.monotonic()
-                try:
-                    text = server.rewrite(text, rules)
-                    t_llm = time.monotonic() - t1
-                    log.info("llm %.2fs: %s", t_llm, text)
-                    entry.update(llm=text, llm_s=t_llm)
-                except Exception as e:
-                    log.exception("llm rewrite failed; using ASR text")
-                    entry["llm"] = f"（失敗：{e}）"
             if cmd.send:
                 entry["edit"] = "貼上後送出（Enter）"
             self.record.emit(entry)
-            self.main.emit(lambda: self._dictate(text, cmd.send, tr, audio, hwnd))
+            asks = [a for a in asks if a.end <= len(cmd.text)]   # a trailing 送出 was cut off
+            self.main.emit(lambda: self._dictate(cmd.text, cmd.send, tr, audio, hwnd, asks))
         except Exception:
             log.exception("transcribe failed")
             self.main.emit(self.overlay.hide_overlay)
 
-    def _judge(self, text: str, start: int, end: int, value: str) -> bool:
-        """Context hotwords: replace only if the LLM prefers value over the recognised word in this sentence."""
-        server = self.llm
-        if server is None:
-            return False
-        self.rewriting.emit()   # any LLM work shows the ring, not the ASR dots
-        ranked = server.rank(text[:start], text[end:], [text[start:end], value])
-        log.info("hotword judge %s|%s: %s", text[start:end], value, [(c, round(p, 2)) for p, c in ranked])
-        return ranked[0][1] == value
-
     # --- dictation ---
-    def _dictate(self, text: str, send: bool, tr, audio, hwnd: int):
-        """Main thread: paste a dictation (and press Enter), learn from a re-dictation, start the re-check."""
+    def _dictate(self, text: str, send: bool, tr, audio, hwnd: int, asks=()):
+        """Main thread: paste a dictation (and press Enter), learn from a re-dictation, offer undecided context
+        hotwords, start the second opinion."""
         self.overlay.hide_overlay()
         log.info("result: %s%s", text, " [送出]" if send else "")
         if text:
@@ -441,24 +335,34 @@ class App(QObject):
                 pair = redictation_pair(prev.text, text)
                 log.info("re-dictation of %r: %s", prev.text, pair)
                 if pair and worth_learning(*pair, False):
-                    self._learn(*pair, False, source="重講")
-            if self.cfg.second_opinion and not send and audio is not None:
+                    i = text.find(pair[1])
+                    self._learn(*pair, False, source="重講",
+                                context=context_words(text, i, i + len(pair[1])) if i >= 0 else None)
+            if asks and not send:
+                a = asks[0]
+                self.on_suspects(u, [suspects.Suspect(a.start, a.end, text[a.start:a.end], [a.hotword.value],
+                                                      a.hotword, a.words)])
+            elif self.cfg.second_opinion and not send and audio is not None:
                 self.bg.submit(self._suspect_job, u)
         if send:
             # after the paste has been read (Windows Terminal reads the clipboard asynchronously)
             QTimer.singleShot(150 if text else 0, press_enter)
             self.session.sent()
 
+    def _second_text(self, u) -> str | None:
+        """The second model's formatted transcript of a dictation (cached on it)."""
+        if u.second is None and self.second is not None and u.audio is not None:
+            t0 = time.monotonic()
+            u.second = format_text(self.second.transcribe(u.audio), self.cfg.strip_trailing_punct)
+            log.info("second opinion %.2fs: %s", time.monotonic() - t0, u.second)
+        return u.second
+
     def _suspect_job(self, u):
         try:
-            other = None
-            if self.second is not None and u.audio is not None:
-                t0 = time.monotonic()
-                other = format_text(self.second.transcribe(u.audio), self.cfg.strip_trailing_punct)
-                u.second = other
-                log.info("second opinion %.2fs: %s", time.monotonic() - t0, other)
-            server = self.llm
-            found = suspects.find(u.text, other, server.rank if server else None)
+            found = suspects.find(u.text, self._second_text(u))
+            # a word a hotword produced or confirmed is the user's own choice: never offer it back
+            values = {h.value for h in self.hotwords.items}
+            found = [f for f in found if f.word not in values]
             if found:
                 self.suspects_ready.emit(u, found)
         except Exception:
@@ -469,17 +373,19 @@ class App(QObject):
         if self.recording or self.picker.isVisible() or u not in s.utterances or not s.clean():
             return
         sus = found[0]
-        log.info("offer: %s -> %s", sus.word, sus.options)
+        log.info("offer: %s -> %s%s", sus.word, sus.options, " (context hotword)" if sus.hotword else "")
         self._menu = ("suspect", u, sus)
-        self.picker.show_list(f"可能聽錯「{sus.word}」：說「對」換成 1，或說第幾個", sus.options, caret_rect(),
-                              timeout_ms=15_000)
+        if sus.hotword is not None:
+            title = f"「{sus.word}」要換成「{sus.options[0]}」嗎？說「對」換掉，「不用」保留（會記住這個語境）"
+        else:
+            title = f"可能聽錯「{sus.word}」：說「對」換成 1，或說第幾個"
+        self.picker.show_list(title, sus.options, caret_rect(), timeout_ms=15_000)
         s.ignore_rects = [self.picker.physical_rect()]
 
     # --- voice commands without a selection ---
     def _command_job(self, cmd, entry, hwnd) -> bool:
         """Worker thread. True if the command was handled; False = dictate the utterance instead."""
         s, k = self.session, cmd.kind
-        entry["llm"] = None
         note = None
         if k == commands.UNDO:
             self.main.emit(self._undo_step)
@@ -535,15 +441,13 @@ class App(QObject):
             else:
                 new, spelled = self._replacement(old, cmd)
                 if new is None:
-                    new = self._best_alternative(s.buffer[:a], old, s.buffer[b:])
-                    if new is None:
-                        note = f"「{old}」沒有其他候選"
-                        self.main.emit(lambda n=note: self._notify(n))
-                        entry["edit"] = note
-                        self.record.emit(entry)
-                        return True
-                self._rewrite_later(a, b, new, f"{old} → {new}", learn=(old, new, spelled))
-                note = f"{old} → {new}"
+                    # the ASR wrote the new word like the old one (城市改成城市): let the user pick
+                    words = self._alternatives(old)
+                    self.main.emit(lambda: self._open_span_menu(a, b, old, words))
+                    note = f"選字「{old}」"
+                else:
+                    self._rewrite_later(a, b, new, f"{old} → {new}", learn=(old, new, spelled))
+                    note = f"{old} → {new}"
         entry["edit"] = f"指令：{note}"
         log.info("command %s: %s", k, note)
         self.record.emit(entry)
@@ -551,7 +455,7 @@ class App(QObject):
 
     def _replacement(self, old: str, cmd) -> tuple[str | None, bool]:
         """What 改成Y means for old: a described character (教育的育), spelled letters (match old's case), or Y.
-        None when Y is old itself (the ASR wrote the new word the same way): pick the best other candidate."""
+        None when Y is old itself (the ASR wrote the new word the same way)."""
         ch = edit.described_char(cmd.text)
         if ch:
             new = edit.replace_char(old, ch)
@@ -563,16 +467,14 @@ class App(QObject):
             return None, False
         return cmd.text, False
 
-    def _best_alternative(self, before: str, word: str, after: str) -> str | None:
-        words = candidates.homophones(word)
+    def _open_span_menu(self, a: int, b: int, word: str, words: list[str]):
+        self.overlay.hide_overlay()
         if not words:
-            return None
-        server = self.llm
-        if server is None:
-            return words[0]
-        self.rewriting.emit()
-        ranked = server.rank(before, after, [word] + words)
-        return next((c for _, c in ranked if c != word), None)
+            self._notify(f"「{word}」沒有同音候選")
+            return
+        self._menu = ("span", a, b, word)
+        self.picker.show_list(f"選字：{word}　點選或說「第幾個」", words, caret_rect())
+        self.session.ignore_rects = [self.picker.physical_rect()]
 
     def _rewrite_later(self, a: int, b: int, new: str, note: str, learn=None):
         expected = self.session.buffer
@@ -592,7 +494,7 @@ class App(QObject):
         h = None
         if learn:
             old, new_word = _with_neighbours(s.buffer[:a], learn[0], learn[1], s.buffer[b:])
-            h = self._learn(old, new_word, learn[2])
+            h = self._learn(old, new_word, learn[2], context=context_words(s.buffer, a, b))
         s.apply_replace(a, b, new, note, h)
 
     def _undo_step(self):
@@ -631,79 +533,44 @@ class App(QObject):
         self.tray.showMessage("VoiceInput", text, self.icon_idle, 2500)
 
     # --- voice edits on a selection ---
-    def _alternatives(self, sel) -> list[str]:
-        """What else the selection could be: the second model's version of it (when it came from a recent
-        dictation), then same-sounding words."""
+    def _alternatives(self, word: str) -> list[str]:
+        """What else word could be, best first: the second model's version of it (when it came from a recent
+        dictation), the value of a learned hotword for it, then same-sounding words by frequency."""
         alts = []
         for u in reversed(self._recent):
-            i = u.text.rfind(sel.text)
+            i = u.text.rfind(word)
             if i < 0:
                 continue
-            if u.second is None and self.second is not None and u.audio is not None:
-                u.second = format_text(self.second.transcribe(u.audio), self.cfg.strip_trailing_punct)
-            for s, e, alt in suspects.disagreements(u.text, u.second or ""):
-                if i <= s and e <= i + len(sel.text):
-                    word = sel.text[:s - i] + alt + sel.text[e - i:]
-                    if word not in alts:
-                        alts.append(word)
+            for s, e, alt in suspects.disagreements(u.text, self._second_text(u) or ""):
+                if i <= s and e <= i + len(word):
+                    w = word[:s - i] + alt + word[e - i:]
+                    if w not in alts:
+                        alts.append(w)
             break
-        return alts + [w for w in candidates.homophones(sel.text) if w not in alts]
-
-    def _ranked(self, sel) -> list[str]:
-        """Candidates for the selection, best fit for its line first (frequency order without the LLM)."""
-        words = self._alternatives(sel)
-        server = self.llm
-        if server is None or not words:
-            return words
-        self.rewriting.emit()
-        t0 = time.monotonic()
-        ranked = server.rank(sel.before, sel.after, [sel.text] + words)
-        log.info("rank %.2fs %s: %s", time.monotonic() - t0, sel.text, [(c, round(p, 2)) for p, c in ranked])
-        return [c for _, c in ranked if c != sel.text]
+        h = self.hotwords.find(word)
+        if h is not None and h.value not in alts:
+            alts.append(h.value)
+        return alts + [w for w in candidates.homophones(word) if w not in alts and w != word]
 
     def _edit_job(self, sel, raw: str, text: str, entry: dict, hwnd: int):
-        """Worker thread: turn the utterance into an edit of the selection, using the LLM where needed."""
+        """Worker thread: turn the utterance into an edit of the selection."""
         cmd = commands.parse(raw, text) if self.cfg.voice_commands else None
         if cmd is not None and cmd.kind in (commands.UNDO, commands.FORGET, commands.SEND, commands.NEWLINE):
             if self._command_job(cmd, entry, hwnd):
                 return
         ed = edit.plan(sel.text, raw, text)
+        if ed.action == edit.REPICK:
+            ed = edit.Edit(edit.CANDIDATES)   # saying the word again: show the other candidates
         note = _describe(sel.text, ed)
-        try:
-            if ed.action == edit.REPICK:
-                words = self._ranked(sel)
-                if words and self.llm is not None:
-                    ed = edit.Edit(edit.REPLACE, words[0])
-                    note = f"{sel.text} → {words[0]}（自動挑選）"
-                elif words:
-                    ed = edit.Edit(edit.CANDIDATES)
-                    note = f"選字「{sel.text}」（LLM 未就緒，改開選單）"
-                else:
-                    note = f"「{sel.text}」沒有同音候選"
-            elif ed.action == edit.INSTRUCT:
-                if self.llm is None:
-                    note = f"「{ed.text}」需要 LLM，但尚未就緒"
-                    ed = edit.Edit(edit.REPICK)
-                else:
-                    self.rewriting.emit()
-                    t0 = time.monotonic()
-                    out = self.llm.instruct(sel.before, sel.text, sel.after, ed.text)
-                    entry.update(llm=out, llm_s=time.monotonic() - t0)
-                    note = f"{sel.text} → {out}（指令：{ed.text}）"
-                    ed = edit.Edit(edit.REPLACE, out) if out != sel.text else edit.Edit(edit.REPICK)
-        except Exception as e:
-            log.exception("edit failed")
-            note = f"失敗：{e}"
-            ed = edit.Edit(edit.REPICK)
         entry["edit"] = note
         log.info("edit on %s: %s", sel.app, note)
         self.record.emit(entry)
         self.edited.emit(sel, ed, note)
         if ed.action == edit.CANDIDATES:
             try:
-                words = self._ranked(sel)
+                words = self._alternatives(sel.text)
             except Exception:
-                log.exception("ranking candidates failed")
+                log.exception("candidates failed")
                 words = candidates.homophones(sel.text)
             self.candidates_ready.emit(sel, words)
 
@@ -715,7 +582,8 @@ class App(QObject):
             self.session.replaced_selection(sel.before, sel.text, "", foreground(), f"刪除「{sel.text}」")
         elif ed.action == edit.REPLACE:
             paste_text(ed.text)
-            h = self._learn(*_with_neighbours(sel.before, sel.text, ed.text, sel.after), ed.spelled)
+            h = self._learn(*_with_neighbours(sel.before, sel.text, ed.text, sel.after), ed.spelled,
+                            context=_selection_context(sel))
             self.session.replaced_selection(sel.before, sel.text, ed.text, foreground(), note, h)
         elif ed.action == edit.CANDIDATES:
             self._menu = ("candidates", sel)
@@ -740,8 +608,16 @@ class App(QObject):
             sel = menu[1]
             log.info("menu pick: %s -> %s", sel.text, word)
             paste_text(word)
-            h = self._learn(sel.text, word, False)
+            h = self._learn(*_with_neighbours(sel.before, sel.text, word, sel.after), False,
+                            context=_selection_context(sel))
             self.session.replaced_selection(sel.before, sel.text, word, foreground(), f"{sel.text} → {word}", h)
+        elif menu[0] == "span":
+            _, a, b, old = menu
+            if self.session.buffer[a:b] != old:
+                self._notify("文字已經改變，沒有修改")
+                return
+            log.info("span pick: %s -> %s", old, word)
+            self._rewrite(a, b, word, f"{old} → {word}", learn=(old, word, False))
         else:
             _, u, sus = menu
             s = self.session
@@ -753,26 +629,48 @@ class App(QObject):
                     return
                 a, b = span
             log.info("suspect pick: %s -> %s", sus.word, word)
-            self._rewrite(a, b, word, f"{sus.word} → {word}", learn=(sus.word, word, False))
+            if sus.hotword is not None:
+                sus.hotword.remember(sus.words, True)
+                sus.hotword.hits += 1
+                self.hotwords.save()
+                self._rewrite(a, b, word, f"{sus.word} → {word}")
+            else:
+                self._rewrite(a, b, word, f"{sus.word} → {word}", learn=(sus.word, word, False))
 
     def on_menu_voice(self, row: int):
-        # a number / 對 picks a row, 不用 closes; anything else closes the menu and is handled normally
+        # a number / 對 picks a row, 不用 declines; anything else closes the menu and is handled normally
+        menu = self._menu
         self.picker.hide()
         if row >= 0:
             self.on_menu_pick(row)
-        else:
-            self._menu = None
-            self.session.ignore_rects = []
+            return
+        self._menu = None
+        self.session.ignore_rects = []
+        if row == -2 and menu and menu[0] == "suspect" and menu[2].hotword is not None:
+            sus = menu[2]
+            log.info("hotword %s declined near %s", sus.hotword.key, sus.words)
+            sus.hotword.remember(sus.words, False)
+            self.hotwords.save()
 
-    def _learn(self, old: str, new: str, spelled: bool, source: str = ""):
+    def _learn(self, old: str, new: str, spelled: bool, source: str = "", context=None):
         """Record old -> new as a hotword if the edit looks like a correction of a misrecognition."""
         if not worth_learning(old, new, spelled):
             return None
         known = self.hotwords.find(old.strip())
         if known is not None and known.value == new.strip():
+            if context:
+                known.remember(context, True)   # one more sentence where it was right
+                self.hotwords.save()
             return None   # already known: nothing new to announce or to undo
-        h = self.hotwords.add(old.strip(), new.strip())
-        log.info("learned hotword%s: %s -> %s", f" ({source})" if source else "", h.key, h.value)
+        if known is not None:
+            # 城市 -> 乘勢 picked once must not overwrite 城市 -> 程式; this sentence just was not a 程式 one
+            log.info("not learning %s -> %s: hotword %s -> %s exists", old, new, known.key, known.value)
+            if context and known.mode != "always":
+                known.remember(context, False)
+                self.hotwords.save()
+            return None
+        h = self.hotwords.add(old.strip(), new.strip(), context=context)
+        log.info("learned hotword%s: %s -> %s near %s", f" ({source})" if source else "", h.key, h.value, context)
         self._undo = self._learned = h
         self.settings.refresh_hotwords()
         self.tray.showMessage("已記住熱詞", f"{h.key} → {h.value}（說「不要記」或點這裡取消）", self.icon_idle, 4000)
@@ -787,31 +685,17 @@ class App(QObject):
     def on_status(self, text: str):
         self._status_text = text
         log.info("status: %s", text)
-        self._show_status()
-
-    def on_llm_status(self, state: str, text: str):
-        self._llm_state = (state, text)
-        self._llm_status_text = f"LLM：{text}" if text else ""
-        log.info("llm status: %s %s", state, text)
-        self.settings.set_llm_state(state, text)
-        self._show_status()
+        self.tray.setToolTip(f"VoiceInput — {text}")
+        self.settings.set_status(text)
 
     def on_record(self, entry: dict):
         self._records.append(entry)
         self.settings.set_log(self._records)
 
-    def _status_line(self) -> str:
-        return "　".join(t for t in (self._status_text, self._llm_status_text) if t)
-
-    def _show_status(self):
-        self.tray.setToolTip(f"VoiceInput — {self._status_line()}")
-        self.settings.set_status(self._status_line())
-
     def open_settings(self):
         self.settings.load_values()
-        self.settings.set_llm_state(*self._llm_state)
         self.settings.set_log(self._records)
-        self.settings.set_status(self._status_line())
+        self.settings.set_status(self._status_text)
         self.settings.show()
         self.settings.raise_()
         self.settings.activateWindow()
@@ -819,9 +703,6 @@ class App(QObject):
     def apply_settings(self):
         self.ptt.set_key(self.cfg.hotkey)
         self._set_autostart()
-        if self.cfg.model != self._model_key:
-            self.load_model(self.cfg.model)
-        self.load_llm()
         self.load_aux()
 
     def _set_autostart(self):
@@ -836,8 +717,6 @@ class App(QObject):
         if self._mouse:
             self._mouse.stop()
         self.tray.hide()
-        if self.llm:
-            self.llm.close()
         self.qapp.quit()
 
 
@@ -849,6 +728,11 @@ def _with_neighbours(before: str, old: str, new: str, after: str) -> tuple[str, 
     left = before[-1:] if before[-1:] and _CJK_CHAR.match(before[-1:]) else ""
     right = after[:1] if after[:1] and _CJK_CHAR.match(after[:1]) else ""
     return left + old.strip() + right, left + new.strip() + right
+
+
+def _selection_context(sel) -> list[str]:
+    line = sel.before + sel.text + sel.after
+    return context_words(line, len(sel.before), len(sel.before) + len(sel.text))
 
 
 def _describe(selected: str, ed) -> str:

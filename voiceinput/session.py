@@ -145,7 +145,11 @@ class Session:
             delta = len(new) - (b - a)
             keep = []
             for u in self.utterances:
-                if u.end <= a:
+                if a == b == u.end and u is self.utterances[-1]:
+                    u.end += delta       # text added right after the last sentence (問號) belongs to it
+                    u.text = self.buffer[u.start:u.end]
+                    keep.append(u)
+                elif u.end <= a:
                     keep.append(u)
                 elif u.start >= b:
                     u.start += delta

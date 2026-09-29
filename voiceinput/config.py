@@ -3,21 +3,17 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .models import DEFAULT_MODEL
 from .paths import CONFIG_PATH, DEFAULT_MODELS_DIR
 
 
 @dataclass
 class Config:
-    model: str = DEFAULT_MODEL     # key in models.MODELS
     mic: str = ""                  # input device name, "" = system default
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
-    llm_enabled: bool = False      # run the local LLM with llm_user_rules (model only loaded when on)
-    llm_user_rules: str = ""       # custom rules the LLM applies; empty = LLM is skipped
     edit_enabled: bool = True      # speaking with text selected edits the selection (刪除, spelling, replace)
-    models_dir: str = ""           # where ASR / LLM models are stored, "" = paths.DEFAULT_MODELS_DIR
+    models_dir: str = ""           # where the models are stored, "" = paths.DEFAULT_MODELS_DIR
     voice_commands: bool = True    # 復原 / 送出 / 換行 / 城市改成程式 … on what was just dictated (commands.py)
     live_caption: bool = True      # streaming X-ASR shows the words while the hotkey is held
     second_opinion: bool = True    # SenseVoice re-checks each dictation in the background; suspects are offered
