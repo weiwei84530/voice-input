@@ -6,6 +6,20 @@
   stop and ask before building, as many rounds as needed, with the recommended option first.
 - Don't guess between materially different designs; asking is cheaper than rebuilding.
 - Ask clarifying questions with the AskUserQuestion tool (when available); use it freely.
+- After every commit, restart VoiceInput if it is running so the user is testing the new code (don't start it if
+  it isn't running). Kill the llama-server too: the app doesn't stop it when killed. PowerShell:
+
+  ```powershell
+  $root = 'E:\Projects\voice-input'
+  $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$root\run.pyw*" -or $_.ExecutablePath -eq "$root\.tools\llama\llama-server.exe" }
+  if ($procs) {
+      $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      $procs | ForEach-Object { Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue }
+      Start-Process "$root\.venv\Scripts\pythonw.exe" -ArgumentList "`"$root\run.pyw`"" -WorkingDirectory $root
+  }
+  ```
+
+  Then check the tail of `%LOCALAPPDATA%\VoiceInput\voiceinput.log` for "llm loaded" / errors.
 
 ## File layout
 
