@@ -7,7 +7,8 @@ Each step is a wav name in <dir>/wav (the hotkey held while it is spoken), sel:W
 box), click (the user clicks: ends what the app knows about the text), tick (click ✓ in the add-hotword box), pick:N
 (click row N of an open menu, 1-based), pickw:WORD (click the row showing WORD), keep (click 保留「X」 in a context
 hotword question), tap (one tap of the hotkey), undo / tap2 (double tap), tap2:WAV (double tap, the second press
-held while WAV is spoken), say:TEXT (dictate TEXT as if recognized), type:TEXT
+held while WAV is spoken), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting
+in memory only), type:TEXT
 (the user replaces the last dictation's copy of its first differing word by hand: type:城市=程式, then the idle
 check runs at once) or key:BACK (the user presses Backspace n times: key:BACK*3).
 It works on a copy of hotwords.json (<dir>/hotwords.test.json) and its own picks.test.json, never on the real files.
@@ -185,6 +186,11 @@ try:
             pump(0.5)
             offer = f"   ✓ 框：{A.picker.title.text()} {A._menu[1:3]}" if A._menu and A._menu[0] == "learn" else ""
             print(f"[手動改 {old} → {new}] → 文字框：{box.text!r}{offer}")
+            continue
+        if step.startswith("set:"):
+            name, value = step[4:].split("=")
+            setattr(A.cfg, name, type(getattr(A.cfg, name))(int(value) if value.isdigit() else value))
+            print(f"[設定 {name} = {getattr(A.cfg, name)!r}]（只改記憶體，不存檔）")
             continue
         if step.startswith("say:"):
             A._dictate(step[4:], None, HWND)

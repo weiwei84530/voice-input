@@ -66,7 +66,8 @@ CJK/ASCII spacing → trailing punctuation.
 
 ## Settings (2026-09-29)
 
-Only microphone, hotkey, strip trailing punctuation, autostart, menu timeout (one value for every menu and the ✓
+Only microphone, hotkey, strip trailing punctuation, autostart, "candidate menu for sounding-alike changes" (on by
+default; off → the ✓ box is offered directly, as before 2026-09-30), menu timeout (one value for every menu and the ✓
 box, default 10s, added 2026-09-30) and the hotwords page (cards in two columns). The
 刪除 / 選字 trigger-word lists were removed 2026-09-30 with the spoken triggers. Selection edits, the second
 opinion and on-screen terms are always on.

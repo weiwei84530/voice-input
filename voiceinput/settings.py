@@ -38,6 +38,9 @@ class SettingsDialog(QDialog):
 
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
+        self.fix_menu = QCheckBox("修改的內容發音相近時，顯示選字選單")
+        self.fix_menu.setToolTip("選取後重講、或撤銷後重講成發音相近的字（城市 → 程式）時，跳出同音字選單；"
+                                 "關閉時改為直接詢問是否加入熱詞")
         self.menu_seconds = QSpinBox(minimum=3, maximum=120, suffix=" 秒")
         self.menu_seconds.setToolTip("選字選單、建議選單和加入熱詞的 ✓ 框，沒點的話幾秒後自動關閉")
         self.menu_seconds.valueChanged.connect(self._apply)
@@ -60,6 +63,7 @@ class SettingsDialog(QDialog):
         form.addRow("", hotkey_note)
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
+        form.addRow("", self.fix_menu)
         form.addRow("選單自動關閉", self.menu_seconds)
         form.addRow("熱詞", hotwords_row)
 
@@ -95,7 +99,7 @@ class SettingsDialog(QDialog):
 
         for combo in (self.mic, self.hotkey):
             combo.currentIndexChanged.connect(self._apply)
-        for box in (self.strip_punct, self.autostart):
+        for box in (self.strip_punct, self.autostart, self.fix_menu):
             box.toggled.connect(self._apply)
 
     def load_values(self):
@@ -104,6 +108,7 @@ class SettingsDialog(QDialog):
         self._select(self.hotkey, self.cfg.hotkey)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
         self.autostart.setChecked(self.cfg.autostart)
+        self.fix_menu.setChecked(self.cfg.fix_menu)
         self.menu_seconds.setValue(self.cfg.menu_seconds)
         self._loading = False
 
@@ -141,6 +146,7 @@ class SettingsDialog(QDialog):
         self.cfg.hotkey = self.hotkey.currentData()
         self.cfg.strip_trailing_punct = self.strip_punct.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
+        self.cfg.fix_menu = self.fix_menu.isChecked()
         self.cfg.menu_seconds = self.menu_seconds.value()
         self.cfg.save()
         self.applied.emit()

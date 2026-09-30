@@ -11,6 +11,7 @@ class Config:
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
+    fix_menu: bool = True          # a replacement that sounds alike opens the candidate menu (else the ✓ box)
     menu_seconds: int = 10         # menus and the ✓ box close after this many seconds
 
     @classmethod

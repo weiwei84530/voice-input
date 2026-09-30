@@ -578,6 +578,9 @@ class App(QObject):
         then words picked before, then alternatives of it and of what it replaced (never the replaced text)."""
         try:
             rows = [fix.new] if fix.new != fix.old else []
+            if not self.cfg.fix_menu:     # setting off: straight to the ✓ box (_offer_fix)
+                self.main.emit(lambda: self._offer_fix(fix, rows))
+                return
             rows += self._menu_words(fix.new, exclude=rows + [fix.old])
             if fix.new != fix.old:
                 rows += self._menu_words(fix.old, exclude=rows)
