@@ -211,6 +211,7 @@ try:
             continue
         A.recorder.audio = load(step)
         A.on_press(False)
+        pump(0.5)
         A.on_release(1.0, False)
         pump(2.5)
         menu = f"   選單：{A.picker.title.text()} {A.picker.candidates}" if A.picker.isVisible() else ""

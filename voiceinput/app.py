@@ -253,8 +253,14 @@ class App(QObject):
             return
         self.recording = True
         self._hwnd = foreground()
-        self.tray.setIcon(self.icon_rec)
-        self.overlay.show_recording()
+        # recording starts now (no lost first syllable), but the indicator waits until the press is no longer a
+        # tap: a double tap would otherwise flash it
+        QTimer.singleShot(int(TAP_THRESHOLD * 1000), lambda: self._show_recording(press))
+
+    def _show_recording(self, press: _Press):
+        if self.recording and self._press is press:
+            self.tray.setIcon(self.icon_rec)
+            self.overlay.show_recording()
 
     def on_release(self, held: float, double: bool):
         press = self._press
