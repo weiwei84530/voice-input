@@ -51,6 +51,7 @@ _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
 _FIX_IDLE_MS = 3000        # after the user stops typing, look for a hand-made correction of the dictation
 _FIX_WINDOW = 120.0        # seconds after a dictation during which hand-made corrections are looked for
 _MENU_ROWS = 8
+_INDICATOR_DELAY = 0.2     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
 
 
 @dataclass
@@ -253,9 +254,9 @@ class App(QObject):
             return
         self.recording = True
         self._hwnd = foreground()
-        # recording starts now (no lost first syllable), but the indicator waits until the press is no longer a
-        # tap: a double tap would otherwise flash it
-        QTimer.singleShot(int(TAP_THRESHOLD * 1000), lambda: self._show_recording(press))
+        # recording starts now (no lost first syllable), but the indicator waits a little so taps and double taps
+        # do not flash it (0.2s, not TAP_THRESHOLD: the user found 0.3s too slow; a slow tap may flash it)
+        QTimer.singleShot(int(_INDICATOR_DELAY * 1000), lambda: self._show_recording(press))
 
     def _show_recording(self, press: _Press):
         if self.recording and self._press is press:

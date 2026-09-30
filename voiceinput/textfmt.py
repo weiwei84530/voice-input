@@ -44,6 +44,10 @@ _DECIMAL_AFTER = re.compile(f" ?點 ?[{NUM}\\d]")
 _DECIMAL_BEFORE = re.compile(f"[{NUM}\\d] ?點 ?$")
 _PERCENT_AFTER = re.compile(r" ?per ?cent\b", re.I)
 _LETTER_AFTER = re.compile(r" ?[A-Za-z](?![A-Za-z])")
+_LATIN_BEFORE = re.compile(r"[A-Za-z] ?$")     # M 三 -> M3, Opus 四 -> Opus 4 (not Python 三個月, L M 一次)
+_CLASSIFIER_AFTER = re.compile("[個位種次天年月日號本台張件條隻塊元人歲秒分小週周倍份頁章層樓杯句字遍回項步套組顆支把片部首場家間名輛課題級季集]")
+_KEEP_START = re.compile("|".join(map(re.escape, _KEEP_WORDS)))
+_LETTER_DIGIT = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]) (\d)")
 _DIGIT_LETTER = re.compile(r"(?<![A-Za-z])(\d+(?:\.\d+)?) ?([A-Za-z])(?![A-Za-z])")
 _PERCENT_EN = re.compile(r"(\d+(?:\.\d+)?) ?per ?cent\b", re.I)
 _DOT_DIGITS = re.compile(r"(?<=\d) ?點 ?(?=\d)")
@@ -139,13 +143,22 @@ def _convert_numbers(text: str) -> str:
     text = _KEEP_RE.sub(protect, text)
 
     def repl(m):
-        # Single-character numbers stay in Chinese (一個, 兩個計劃, 第二種) unless part of a
-        # decimal (三點五), a percentage (五 percent) or a unit letter (二 B -> 2B)
-        if len(m.group(0)) == 1 and not (_DECIMAL_AFTER.match(text, m.end())
-                                         or _DECIMAL_BEFORE.search(text, 0, m.start())
-                                         or _PERCENT_AFTER.match(text, m.end())
-                                         or _LETTER_AFTER.match(text, m.end())):
-            return m.group(0)
+        s = m.group(0)
+        if _DECIMAL_BEFORE.search(text, 0, m.start()) and all(ch in _DIGITS for ch in s):
+            # decimals are read digit by digit: 點一五 -> .15, but 三點八一樣 is 3.8 一樣 and 三點五二 B is 3.5 2B
+            k = next((k for k in range(1, len(s)) if _KEEP_START.match(text, m.start() + k)), len(s))
+            digits = "".join(str(_DIGITS[ch]) for ch in s[:k])
+            if k == len(s) > 1 and _LETTER_AFTER.match(text, m.end()):
+                digits = digits[:-1] + " " + digits[-1]
+            return digits + s[k:]
+        # Single-character numbers stay in Chinese (一個, 兩個計劃, 第二種) unless part of a decimal (三點五), a
+        # percentage (五 percent), next to a letter (二 B -> 2B, M 三 -> M3) or after an English word (Opus 四)
+        if len(s) == 1 and not (_DECIMAL_AFTER.match(text, m.end())
+                                or _PERCENT_AFTER.match(text, m.end())
+                                or _LETTER_AFTER.match(text, m.end())
+                                or (_LATIN_BEFORE.search(text, 0, m.start())
+                                    and not _CLASSIFIER_AFTER.match(text, m.end()))):
+            return s
         v = _parse_number(m.group(0))
         return m.group(0) if v is None else str(v)
 
@@ -175,6 +188,7 @@ def format_text(text: str, strip_trailing_punct: bool = True) -> str:
     text = _DOT_LETTERS.sub(".", text)
     text = _PERCENT_EN.sub(r"\1%", text)
     text = _DIGIT_LETTER.sub(r"\1\2", text)  # 5 h -> 5h, 2 B -> 2B
+    text = _LETTER_DIGIT.sub(r"\1\2", text)  # M 3 -> M3, V 4.1 -> V4.1 (one letter only: Opus 4.8 keeps its space)
     text = _EN_PUNCT.sub(lambda m: m.group(1).translate(_HALF) + " ", text)
     text = _SPACE_CJK_ASCII.sub(r"\1 \2", text)
     text = _SPACE_ASCII_CJK.sub(r"\1 \2", text)

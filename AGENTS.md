@@ -61,6 +61,10 @@ CJK/ASCII spacing → trailing punctuation.
   percentage or followed by a single letter; multi-character ones become digits (十五 → 15, 七百二十八 → 728).
   Also skipped: `_KEEP_WORDS` (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
 - A number directly followed by a single letter is joined, case kept: 二 B → 2B, 五 h → 5h.
+- After an English letter or word a single numeral becomes a digit unless a classifier follows (M 三 → M3,
+  GPT 四 → GPT 4, but Python 三個月, LM 一次 stay); a single letter is joined to the number (V 四點一 → V4.1,
+  Opus 4.8 keeps its space). Decimals are read digit by digit (零點一五 → 0.15, 零點零五 → 0.05), stopping at a kept
+  word (三點八一樣 → 3.8 一樣) and leaving the last digit to a following letter (三點五二 B → 3.5 2B). 2026-09-30.
 - `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
 
@@ -141,8 +145,8 @@ removed the same day they were built: the user corrects by selecting with the mo
 - **Double tap of the hotkey (`hotkey.py`)**, nothing selected, undoes the last change (dictation, replaced
   selection, picked suggestion); holding the second press records again, so it becomes a re-dictation. CapsLock: the
   two replayed taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
-  Recording starts at key-down, but the indicator (overlay, tray icon) only after TAP_THRESHOLD, so taps and
-  double taps do not flash it.
+  Recording starts at key-down, but the indicator (overlay, tray icon) only after 0.2s (0.3s = TAP_THRESHOLD
+  felt slow), so taps and double taps do not flash it.
 - **Re-dictation**: dictation deleted (Backspace/Delete without typing, or double tap) and re-said within 45s → one
   changed word that sounds alike (widened to the dictionary word around it: 黨案 → 檔案) gets the candidate menu.
 - **Hand-made edits**: after a dictation, 3s after the user stops typing (within 120s), the focused control's visible
