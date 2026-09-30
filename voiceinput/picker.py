@@ -95,10 +95,10 @@ class Picker(QWidget):
         self.candidates = candidates
         self._fill(f"選字：{word}" if candidates else f"選字：{word}　找不到同音的候選", candidates)
         if self.isVisible():
-            # rows added to a visible window are shown (and sized) on the next event loop pass
             QTimer.singleShot(0, self._refit)
 
     def _refit(self):
+        """Rows added to a visible window are shown, and sized, on the next event loop pass."""
         if self.isVisible():
             self._shrink()
             self._clamp()
@@ -202,6 +202,7 @@ class Picker(QWidget):
         self.show()
         self._no_activate()
         self._clamp()
+        QTimer.singleShot(0, self._refit)   # rows added while an earlier menu was still open are sized later
 
     @staticmethod
     def _to_logical(p: QPoint) -> QPoint:

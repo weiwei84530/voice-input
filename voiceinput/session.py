@@ -110,8 +110,11 @@ class Session:
             return u
 
     def replaced_selection(self, before: str, old: str, new: str, hwnd: int, note: str):
-        """Record an edit of a selection: the caret now follows new, with before (rest of the line) ahead."""
+        """Record an edit of a selection: the caret now follows new, with before (rest of the line) ahead. The
+        last dictation may have changed, so the box is no longer compared with it (typed_fix)."""
         with self._lock:
+            if self.last is not None:
+                self.last.fix_offered = True
             self.buffer, self.utterances = before + new, []
             self.steps = [Step(before + old, self.buffer, [], note)]
             self.hwnd, self.dirty = hwnd, False
