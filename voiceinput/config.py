@@ -1,8 +1,7 @@
 """Settings persisted as config.json in the per-user data folder (see paths.py)."""
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
-from .edit import DELETE_WORDS, PICK_WORDS
 from .paths import CONFIG_PATH
 
 
@@ -12,9 +11,6 @@ class Config:
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
-    # spoken on a selection: delete it / open the candidate menu (edit.py)
-    delete_words: list = field(default_factory=lambda: list(DELETE_WORDS))
-    pick_words: list = field(default_factory=lambda: list(PICK_WORDS))
 
     @classmethod
     def load(cls) -> "Config":

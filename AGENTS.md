@@ -66,18 +66,23 @@ CJK/ASCII spacing → trailing punctuation.
 
 ## Settings (2026-09-29)
 
-Only microphone, hotkey, strip trailing punctuation, autostart, the two trigger-word lists (刪除 / 選字, prefilled
-with the defaults in `edit.py`, editable) and the hotwords page (cards in two columns). Selection edits, the second
+Only microphone, hotkey, strip trailing punctuation, autostart and the hotwords page (cards in two columns). The
+刪除 / 選字 trigger-word lists were removed 2026-09-30 with the spoken triggers. Selection edits, the second
 opinion and on-screen terms are always on.
 
 ## Voice edits on selected text
 
-Plan agreed 2026-09-27, cut down 2026-09-29. If text is selected when the hotkey goes down (`selection.py`, UI
-Automation TextPattern, read on a background thread), the utterance edits the selection instead of being pasted as
-new text (`edit.py`): a delete trigger → Delete key; a pick trigger or saying the selected word again → candidate
-menu; anything else replaces the selection. Triggers are matched by fuzzy pinyin because ASR hears 選字 as 選自.
-Spelling letters, 教育的育, 改成X, 大寫/小寫 and punctuation names were removed: the user prefers selecting with the
-mouse and picking.
+Plan agreed 2026-09-27, cut down 2026-09-29, spoken triggers replaced by the hotkey 2026-09-30. The selection is
+read when the hotkey goes down (`selection.py`, UI Automation TextPattern, on a background thread). On a selection:
+one tap → candidate menu (opened DOUBLE_TAP_GAP after the release, so a double tap can cancel it); double tap →
+Delete key; hold and speak → replaces it; double tap with the second press held → Delete at the second press, then
+the dictation is pasted there. There are no spoken commands on a selection (刪除 / 選字 / saying the word again
+were removed). When the new text sounds like what it replaced (`edit.similar`: same text, same syllables, one
+character of the same sound, or similar Latin spelling), it is pasted and the candidate menu opens for it; a pick
+there is what offers the hotword. CapsLock: the app, not `hotkey.py`, decides replays (`PushToTalk.tap()`). A
+single tap is replayed at once (typing right after a CapsLock tap must not wait for UIA) and replayed again once
+the probe finds a selection; other hotkeys are replayed only when there is no selection. Spelling letters,
+教育的育, 改成X, 大寫/小寫 were removed: the user prefers selecting with the mouse and picking.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
 Terminals give no selection: Claude Code in Windows Terminal hides its mouse selection from UIA, Shift+arrow does
 not select, and a paste goes to the caret.
@@ -85,12 +90,15 @@ not select, and a paste goes to the caret.
 Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency + POS) indexed by fuzzy toneless pinyin,
 cached in DATA_DIR/cache (build ~15s, load ~0.5s). Menu order: the second model's version of the word (when it
 came from a recent dictation), the value of a learned hotword for it, then homophones by exact pinyin and frequency.
+Words the user picked in any menu come first when they sound like the word (`picks.py`, DATA_DIR/picks.json, by
+fuzzy syllables, most recent first; decided 2026-09-30). The menu after a sounding-alike replacement lists what was
+pasted first and never the replaced text.
 
 ## Menus: mouse only (2026-09-29)
 
 The menu (`picker.py`) is a non-activating window. Speech never answers it: short answers (對, 第二個) were often
 misheard. The user clicks a row; a context hotword question has a last row 保留「X」 (what saying 不用 used to do);
-✕ or the timeout just closes it.
+✕ or the timeout just closes it. A white-gray bar along the bottom edge counts the timeout down (2026-09-30).
 
 ## Hotwords
 
@@ -103,8 +111,9 @@ fix is learned with its neighbours (張雨薇: 雨 → 育 is stored as 張雨�
 overwritten by a different value (picking 乘勢 for 城市 in one sentence must not replace 城市 → 程式); that
 sentence's words become a declined context instead. Changing a hotword's replacement back (程式 → 城市 by 選字,
 re-saying or typing) is never offered as a reverse hotword: the sentence's words go to that hotword's `negatives`,
-as if 保留 had been clicked (a reverse hotword would fight the original). Offer sources: a replaced selection, a picked suggestion,
-a re-dictation, and a hand-made edit (below).
+as if 保留 had been clicked (a reverse hotword would fight the original). Offer sources (2026-09-30): a pick in a menu, and a
+hand-made edit (below). A replaced selection or re-dictation that sounds alike opens the candidate menu first; only
+when it has nothing else to list (an English word) is the ✓ box offered directly.
 
 Modes (settings: 一律取代 / 自動判斷): "always" replaces blindly. "context" (default) decides by the words around the key (`context_words`: content
 words within 6 characters, function words dropped). Each hotword keeps the words seen where the value was right
@@ -118,15 +127,20 @@ word wins, then a confirmed one; with neither the key is left as spoken and the 
 Voice commands on what was just dictated (復原, 送出, 換行, 刪掉上一句, X改成Y, 刪掉X, symbol names, trailing 送出) were
 removed the same day they were built: the user corrects by selecting with the mouse instead. What remains:
 
+- **Punctuation names** (restored 2026-09-30, `edit.symbol`): an utterance that is exactly 逗號 / 句號 / 句點 / 問號 /
+  驚嘆號 / 感嘆號 / 頓號 / 分號 / 冒號 / 點點點 / 刪節號 / 省略號 types the mark, appended after any existing
+  punctuation (the user chose not to replace it). Exact text only: 都好 is not 逗號. On a selection it replaces it.
+  This is the only spoken command left.
+
 - **Dictated-text buffer (`session.py`)**: the text we pasted is known to sit right before the caret until the user
   presses a key (keyboard hook, injected keys ignored), clicks (mouse hook; clicks on our menu ignored) or another
   window comes to the front. Changes to it are Backspace up to the edit point (one `SendInput` burst) + paste of
   the new tail; works in terminals too.
-- **Double tap of the hotkey (`hotkey.py`)** undoes the last change (dictation, replaced selection, picked
-  suggestion); holding the second press records again, so it becomes a re-dictation. CapsLock: the two replayed
-  taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
-- **Re-dictation learning**: dictation deleted (Backspace/Delete without typing, or double tap) and re-said within
-  45s → one changed word/phrase is offered (✓ box) (cloud → Claude, 城市 → 程式).
+- **Double tap of the hotkey (`hotkey.py`)**, nothing selected, undoes the last change (dictation, replaced
+  selection, picked suggestion); holding the second press records again, so it becomes a re-dictation. CapsLock: the
+  two replayed taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
+- **Re-dictation**: dictation deleted (Backspace/Delete without typing, or double tap) and re-said within 45s → one
+  changed word that sounds alike (widened to the dictionary word around it: 黨案 → 檔案) gets the candidate menu.
 - **Hand-made edits**: after a dictation, 3s after the user stops typing (within 120s), the focused control's visible
   text is read by UIA and compared with the dictation (`session.typed_fix`: longest prefix/suffix anchors, then
   `redictation_pair`). One changed word is offered (✓ box), once per dictation. Needs a TextPattern (not every app).

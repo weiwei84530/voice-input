@@ -16,6 +16,7 @@ else:
 
 CONFIG_PATH = DATA_DIR / "config.json"
 HOTWORDS_PATH = DATA_DIR / "hotwords.json"
+PICKS_PATH = DATA_DIR / "picks.json"
 LOG_PATH = DATA_DIR / "voiceinput.log"
 LOCK_PATH = DATA_DIR / ".voiceinput.lock"
 DEFAULT_MODELS_DIR = DATA_DIR / "models"

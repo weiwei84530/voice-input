@@ -1,46 +1,47 @@
-"""Voice edits on selected text: decide what the spoken words mean for the selection.
+"""What an utterance means for selected text, and the two special utterances.
 
-A delete trigger (刪除) deletes the selection, a pick trigger (選字) or saying the selected word again opens the
-candidate menu, anything else replaces the selection as spoken. The trigger words are user settings, matched by
-toneless pinyin because ASR hears 選字 as 選自. Spelling letters, 教育的育, 改成X, 大寫 / 小寫 and punctuation
-names were removed 2026-09-29: corrections are made by selecting with the mouse and picking.
+Speaking with text selected replaces it (as typing would). There are no spoken commands on a selection any more
+(2026-09-30): the hotkey does it: one tap opens the candidate menu, a double tap deletes, a double tap held deletes
+and dictates in its place. When the new text sounds like what it replaced (城市 → 程式, or 城市 heard again), the
+app pastes it and opens the candidate menu for it (similar()).
+
+A bare punctuation name (逗號, 句號, 驚嘆號 …) is typed as the mark itself; only when the whole utterance is exactly
+the name, so 逗號很重要 is dictated as spoken.
 """
 import re
-from dataclasses import dataclass
 
 from .candidates import syllables
+from .hotwords import worth_learning
 
-DELETE, CANDIDATES, REPLACE = "delete", "candidates", "replace"
-DELETE_WORDS = ["刪除", "刪掉", "刪除掉"]
-PICK_WORDS = ["選字", "換字", "改字"]
+SYMBOLS = {"句號": "。", "句點": "。", "逗號": "，", "問號": "？", "驚嘆號": "！", "感嘆號": "！", "驚歎號": "！",
+           "感歎號": "！", "頓號": "、", "分號": "；", "冒號": "：", "點點點": "……", "刪節號": "……", "省略號": "……"}
 
-_PUNCT = re.compile(r"[\s，。、！？；：,.!?;:]+")
+_PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 _TRAILING = re.compile(r"[。，,.！？!?；;]+$")
-_SPLIT = re.compile(r"[\s,，、;；]+")
+_CJK_CHAR = re.compile(r"^[㐀-䶿一-鿿]$")
 
 
-@dataclass
-class Edit:
-    action: str
-    text: str = ""        # replacement (REPLACE)
+def symbol(formatted: str) -> str | None:
+    """The punctuation mark when the whole utterance is its name (逗號 / 逗號。), else None."""
+    return SYMBOLS.get(_PUNCT.sub("", formatted))
 
 
-def split_words(text: str) -> list[str]:
-    """Trigger words typed in the settings, separated by commas or spaces."""
-    return [w for w in _SPLIT.split(text) if w]
-
-
-def plan(selected: str, formatted: str, delete_words: list[str], pick_words: list[str]) -> Edit:
-    """formatted: the spoken text after format_text / hotwords."""
-    spoken = _PUNCT.sub("", formatted)
-    if not spoken or spoken == _PUNCT.sub("", selected):
-        return Edit(CANDIDATES)          # the same word again: "not this one"
-    sounds = syllables(spoken)
-    if any(sounds == syllables(w) for w in delete_words):
-        return Edit(DELETE)
-    if any(sounds == syllables(w) for w in pick_words):
-        return Edit(CANDIDATES)
+def replacement(selected: str, formatted: str) -> str:
+    """The text that replaces a selection: sentence-final punctuation only if the selection had some."""
     text = formatted.strip()
     if not _TRAILING.search(selected):
         text = _TRAILING.sub("", text)
-    return Edit(REPLACE, text)
+    return text
+
+
+def similar(old: str, new: str) -> bool:
+    """new sounds (or is spelled) like old: the user was correcting a misrecognition, not changing the text.
+    The same word again counts (the recognizer heard 城市 once more), as does one character (雨 / 育)."""
+    old, new = _PUNCT.sub("", old), _PUNCT.sub("", new)
+    if not old or not new:
+        return False
+    if old.casefold() == new.casefold():
+        return True
+    if _CJK_CHAR.match(old) and _CJK_CHAR.match(new):
+        return syllables(old) == syllables(new)
+    return worth_learning(old, new, False)

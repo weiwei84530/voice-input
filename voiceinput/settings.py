@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QStackedWidget,
                                QTextBrowser, QVBoxLayout, QWidget)
 
-from . import audio, edit, hotwords
+from . import audio, hotwords
 from .hotkey import HOTKEYS
 
 HOTWORDS_NOTE = ("修正辨識錯的字後（選取後改字或選字、刪掉重講、手動改字），會詢問是否加入熱詞。"
@@ -38,12 +38,6 @@ class SettingsDialog(QDialog):
 
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
-        self.delete_words = QLineEdit(placeholderText="、".join(edit.DELETE_WORDS))
-        self.pick_words = QLineEdit(placeholderText="、".join(edit.PICK_WORDS))
-        for box, tip in ((self.delete_words, "選取文字後說這些詞，會刪除選取的文字"),
-                         (self.pick_words, "選取文字後說這些詞，會列出同音字讓你點選")):
-            box.setToolTip(tip + "。多個詞用逗號或空格分開。")
-            box.editingFinished.connect(self._apply)
         hotwords_btn = QPushButton("管理熱詞…", clicked=lambda: self._show_page(1))
         hotwords_row = QHBoxLayout()
         hotwords_row.addWidget(hotwords_btn)
@@ -55,15 +49,14 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
-        hotkey_note = QLabel("按住說話；快按兩下撤銷剛輸入的文字，第二下按住可直接重講")
+        hotkey_note = QLabel("按住說話；快按兩下撤銷剛輸入的文字，第二下按住可直接重講。\n"
+                             "選取文字時：按一下開選字選單，快按兩下刪除，第二下按住可刪除後重講")
         hotkey_note.setStyleSheet("color: gray")
         hotkey_note.setWordWrap(True)
         form.addRow("錄音快捷鍵", self.hotkey)
         form.addRow("", hotkey_note)
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
-        form.addRow("刪除指令", self.delete_words)
-        form.addRow("選字指令", self.pick_words)
         form.addRow("熱詞", hotwords_row)
 
         left = QVBoxLayout()
@@ -107,8 +100,6 @@ class SettingsDialog(QDialog):
         self._select(self.hotkey, self.cfg.hotkey)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
         self.autostart.setChecked(self.cfg.autostart)
-        self.delete_words.setText("、".join(self.cfg.delete_words))
-        self.pick_words.setText("、".join(self.cfg.pick_words))
         self._loading = False
 
     def set_status(self, text: str):
@@ -145,8 +136,6 @@ class SettingsDialog(QDialog):
         self.cfg.hotkey = self.hotkey.currentData()
         self.cfg.strip_trailing_punct = self.strip_punct.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
-        self.cfg.delete_words = edit.split_words(self.delete_words.text())
-        self.cfg.pick_words = edit.split_words(self.pick_words.text())
         self.cfg.save()
         self.applied.emit()
 

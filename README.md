@@ -26,26 +26,31 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 
 ## Usage
 
-- Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock.
+- Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
 - Double-tap the hotkey to undo what you just dictated; hold the second press to say it again.
-- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login, the
-  words for 刪除 / 選字, hotwords) and a per-utterance log for this session. Changes apply immediately.
+- Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark.
+- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login,
+  hotwords) and a per-utterance log for this session. Changes apply immediately.
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 
 ## Correcting
 
-Select text with the mouse, then hold the hotkey and say:
+Select text with the mouse, then:
 
-| Say | Does |
+| Hotkey | Does |
 |---|---|
-| 刪除 (editable in settings) | delete the selection |
-| 選字 (editable), or the selected word again | a menu of same-sounding words; click one |
-| anything else | replaces the selection |
+| tap once | a menu of same-sounding words; click one |
+| double tap | delete the selection |
+| hold and speak | replaces the selection |
+| double tap, hold the second press and speak | deletes the selection, then types what you say |
+
+When what you say sounds like what it replaced (城市 → 程式), or you undo a sentence and say it again with a word
+changed, the new text is typed and a menu of same-sounding words opens for it. Words you picked before come first.
 
 After a dictation a small menu may offer a likely misheard word (a second model heard it differently), or ask whether
 a learned correction applies here (「城市」換成？ with a 保留「城市」 row). Menus are answered with the mouse only.
-Corrections are offered as hotwords (click ✓ to add): a replaced selection, a picked word, a sentence undone and said
-again, or a word you fixed by typing. A hotword remembers the words around it to decide next time.
+Corrections are offered as hotwords (click ✓ to add) after you pick a word in a menu, or when you fix a word by typing.
+A bar on the menu's bottom edge shows the time left before it closes. A hotword remembers the words around it to decide next time.
 
 ## Models
 
@@ -76,11 +81,12 @@ voiceinput/
   asr.py       sherpa-onnx recognizers, hotword biasing
   textfmt.py   final text formatting (incl. repeated-word removal)
   session.py   what was just typed at the caret, undo, learning from re-dictation and hand edits
-  edit.py      voice edits on a selection
+  edit.py      replacing a selection, punctuation names, "sounds alike" test
   suspects.py  second-opinion check for misheard words
   selection.py selection / on-screen terms via UI Automation
   hotwords.py  learned corrections; ASR biasing words
   candidates.py same-sounding words (jieba dictionary)
+  picks.py     words picked in menus, listed first next time
   picker.py    candidate / suggestion menu
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log

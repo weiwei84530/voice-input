@@ -2,12 +2,13 @@
 
 Two uses: a list of choices (選字 candidates, a suspected mishearing, a context hotword question) and a yes/no box
 asking whether to add a hotword. Both are answered with the mouse only (decided 2026-09-29: short spoken answers
-like 對 / 第二個 were often misheard)."""
+like 對 / 第二個 were often misheard). A thin bar on the bottom edge shrinks as the timeout runs out."""
 import sys
+import time
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QGuiApplication
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStyle, QStyleOption, QVBoxLayout, QWidget
 
 _STYLE = """
 QWidget#picker { background: #202024; border: 1px solid #3a3a40; border-radius: 8px; }
@@ -22,6 +23,31 @@ QPushButton#tick { color: #7fd6a4; font-size: 16px; font-weight: bold; padding: 
 QPushButton#tick:hover { background: #2c4a3a; }
 """
 _MAX_WIDTH = 360
+_RADIUS = 8
+_BAR = 3                              # countdown bar height (px)
+_BAR_COLOR = QColor(200, 200, 206)
+
+
+class _Frame(QWidget):
+    """The menu's rounded panel, with the countdown bar painted along its bottom edge."""
+
+    def __init__(self, parent):
+        super().__init__(parent, objectName="picker")
+        self.remaining = 0.0          # fraction of the timeout left, 0 hides the bar
+
+    def paintEvent(self, e):
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)   # the stylesheet background and border
+        if self.remaining > 0:
+            p.setRenderHint(QPainter.Antialiasing)
+            clip = QPainterPath()
+            clip.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), _RADIUS - 1, _RADIUS - 1)
+            p.setClipPath(clip)
+            w = (self.width() - 2) * self.remaining
+            p.fillRect(QRectF(1, self.height() - 1 - _BAR, w, _BAR), _BAR_COLOR)
+        p.end()
 
 
 class Picker(QWidget):
@@ -36,8 +62,10 @@ class Picker(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.candidates: list[str] = []
         self._timer = QTimer(self, singleShot=True, interval=30_000, timeout=self.hide)
+        self._tick = QTimer(self, interval=40, timeout=self._countdown)
+        self._deadline = self._total = 0.0
 
-        self.frame = QWidget(self, objectName="picker")
+        self.frame = _Frame(self)
         self.frame.setStyleSheet(_STYLE)
         self.frame.setMaximumWidth(_MAX_WIDTH)
         self.title = QLabel()
@@ -49,7 +77,7 @@ class Picker(QWidget):
         self.rows = QVBoxLayout()
         self.rows.setSpacing(0)
         inner = QVBoxLayout(self.frame)
-        inner.setContentsMargins(6, 4, 6, 6)
+        inner.setContentsMargins(6, 4, 6, 6 + _BAR)
         inner.setSpacing(2)
         inner.addLayout(head)
         inner.addLayout(self.rows)
@@ -75,7 +103,7 @@ class Picker(QWidget):
         if keep:
             self.rows.addWidget(QPushButton(keep, objectName="keep", clicked=self._decline))
             self._shrink()
-        self._timer.start(timeout_ms)
+        self._start_timer(timeout_ms)
         self._place(rect, bottom=True)
 
     def show_confirm(self, title: str, text: str, rect, timeout_ms: int = 15_000):
@@ -90,8 +118,22 @@ class Picker(QWidget):
         h.addWidget(QPushButton("✓", objectName="tick", clicked=self._confirm))
         self.rows.addWidget(row)
         self._shrink()
-        self._timer.start(timeout_ms)
+        self._start_timer(timeout_ms)
         self._place(rect, bottom=True)
+
+    def _start_timer(self, ms: int):
+        self._timer.start(ms)
+        self._total = ms / 1000
+        self._deadline = time.monotonic() + self._total
+        self._tick.start()
+        self._countdown()
+
+    def _countdown(self):
+        left = self._deadline - time.monotonic()
+        self.frame.remaining = max(0.0, left / self._total) if self._total else 0.0
+        self.frame.update()
+        if left <= 0:
+            self._tick.stop()
 
     def physical_rect(self) -> tuple[int, int, int, int]:
         """(left, top, right, bottom) in physical pixels, for telling clicks on the menu from clicks elsewhere."""
@@ -119,7 +161,7 @@ class Picker(QWidget):
         for i, word in enumerate(candidates):
             self.rows.addWidget(QPushButton(word, clicked=lambda _=False, i=i: self._pick(i)))
         self._shrink()
-        self._timer.start(30_000)
+        self._start_timer(30_000)
 
     def _pick(self, i: int):
         self.hide()
@@ -178,4 +220,5 @@ class Picker(QWidget):
 
     def hideEvent(self, e):
         self._timer.stop()
+        self._tick.stop()
         super().hideEvent(e)

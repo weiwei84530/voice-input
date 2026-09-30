@@ -1,15 +1,13 @@
 """Global push-to-talk hotkey via pynput.
 
 On Windows the hotkey is suppressed with a low-level hook so holding CapsLock
-does not toggle caps state. A short tap (< TAP_THRESHOLD) is replayed as a
-normal key press, so CapsLock still works as CapsLock when tapped.
+does not toggle caps state. Whether a short tap (< TAP_THRESHOLD) is replayed as a normal key press is up to the
+app (tap()): a tap on selected text is VoiceInput's own gesture, anywhere else CapsLock still works as CapsLock.
 
-A double tap (second press within DOUBLE_TAP_GAP of a tap) calls on_double() before on_press(): the app undoes
-the last dictation, and holding the second press records again. Two replayed taps cancel out; when the second
-press is held (no replay) one more tap is replayed so the first tap's toggle is undone.
+A double tap is a second press within DOUBLE_TAP_GAP of a tap's release; on_press / on_release get double=True
+for that second press.
 """
 import sys
-import threading
 import time
 
 from pynput import keyboard
@@ -31,12 +29,11 @@ _LLKHF_INJECTED = 0x10
 
 
 class PushToTalk:
-    """Calls on_press() when the hotkey goes down and on_release(held_seconds) when it goes up."""
+    """Calls on_press(double) when the hotkey goes down and on_release(held_seconds, double) when it goes up."""
 
-    def __init__(self, key_name: str, on_press, on_release, on_other_key=None, on_double=None):
+    def __init__(self, key_name: str, on_press, on_release, on_other_key=None):
         self.on_press = on_press
         self.on_release = on_release
-        self.on_double = on_double
         self.on_other_key = on_other_key   # on_other_key(vk): any other key the user pressed (Windows only)
         self._key_name = key_name
         self._down_at = None
@@ -96,9 +93,7 @@ class PushToTalk:
         self._down_at = time.monotonic()
         self._double = self._tap_up_at is not None and self._down_at - self._tap_up_at < DOUBLE_TAP_GAP
         self._tap_up_at = None
-        if self._double and self.on_double:
-            self.on_double()
-        self.on_press()
+        self.on_press(self._double)
 
     def _handle_up(self):
         if self._down_at is None:
@@ -106,15 +101,13 @@ class PushToTalk:
         now = time.monotonic()
         held = now - self._down_at
         self._down_at = None
-        self.on_release(held)
-        tap = held < TAP_THRESHOLD
-        self._tap_up_at = now if tap and not self._double else None
-        undo_toggle = self._double and not tap and self._key_name == "caps_lock"
-        if (tap or undo_toggle) and sys.platform == "win32":
-            # Replay the tap outside the hook callback
-            threading.Thread(target=self._replay_tap, daemon=True).start()
+        self._tap_up_at = now if held < TAP_THRESHOLD and not self._double else None
+        self.on_release(held, self._double)
 
-    def _replay_tap(self):
+    def tap(self):
+        """Replay one press of the hotkey to the focused app (injected, so the hook lets it through)."""
+        if sys.platform != "win32":
+            return
         key = HOTKEYS[self._key_name][1]
         self._controller.press(key)
         self._controller.release(key)
