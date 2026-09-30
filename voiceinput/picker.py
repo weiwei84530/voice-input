@@ -61,6 +61,7 @@ class Picker(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.candidates: list[str] = []
+        self._anchor = None         # (top-left, bottom y) of the selection the menu belongs to, logical pixels
         self.timeout_ms = 10_000    # every menu closes after this (a setting)
         self._timer = QTimer(self, singleShot=True, interval=self.timeout_ms, timeout=self.hide)
         self._tick = QTimer(self, interval=40, timeout=self._countdown)
@@ -94,6 +95,12 @@ class Picker(QWidget):
         self.candidates = candidates
         self._fill(f"選字：{word}" if candidates else f"選字：{word}　找不到同音的候選", candidates)
         if self.isVisible():
+            # rows added to a visible window are shown (and sized) on the next event loop pass
+            QTimer.singleShot(0, self._refit)
+
+    def _refit(self):
+        if self.isVisible():
+            self._shrink()
             self._clamp()
 
     def show_list(self, title: str, words: list[str], rect, keep: str = ""):
@@ -179,9 +186,12 @@ class Picker(QWidget):
     def _place(self, rect, bottom: bool = False):
         """rect: selection bounds in physical screen pixels (x, y, w, h) from UI Automation, or None (then next
         to the mouse, or with bottom=True above the recording indicator at the bottom of the screen)."""
+        self._anchor = None
         if rect:
             x, y, w, h = rect
-            pos = self._to_logical(QPoint(int(x), int(y + h))) + QPoint(0, 6)
+            top = self._to_logical(QPoint(int(x), int(y)))
+            self._anchor = (top, self._to_logical(QPoint(int(x), int(y + h))).y())
+            pos = QPoint(top.x(), self._anchor[1] + 6)
         elif bottom:
             screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
             g = screen.availableGeometry()
@@ -203,10 +213,18 @@ class Picker(QWidget):
         return p
 
     def _clamp(self):
-        screen = QGuiApplication.screenAt(self.pos()) or QGuiApplication.primaryScreen()
+        """Keep the menu on screen. Under a selection too close to the bottom it opens above it instead, like an
+        IME candidate window."""
+        anchor = self._anchor
+        screen = QGuiApplication.screenAt(anchor[0] if anchor else self.pos()) or QGuiApplication.primaryScreen()
         a = screen.availableGeometry()
+        y = self.y()
+        if anchor:
+            y = anchor[1] + 6
+            if y + self.height() > a.bottom():
+                y = anchor[0].y() - 6 - self.height()
         x = min(max(self.x(), a.left()), a.right() - self.width())
-        y = min(max(self.y(), a.top()), a.bottom() - self.height())
+        y = min(max(y, a.top()), a.bottom() - self.height())
         self.move(x, y)
 
     def _no_activate(self):

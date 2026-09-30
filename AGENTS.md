@@ -90,8 +90,14 @@ single tap is replayed at once (typing right after a CapsLock tap must not wait 
 the probe finds a selection; other hotkeys are replayed only when there is no selection. Spelling letters,
 教育的育, 改成X, 大寫/小寫 were removed: the user prefers selecting with the mouse and picking.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
-Terminals give no selection: Claude Code in Windows Terminal hides its mouse selection from UIA, Shift+arrow does
-not select, and a paste goes to the caret.
+Terminals: Claude Code in Windows Terminal hides its mouse selection from UIA, Shift+arrow does not select, and a
+paste goes to the caret. Since 2026-10-01 a mouse drag there works like a selection anywhere else
+(`selection.TermWatcher`, probed with `dev/term_probe.py`): herdr copies the selection to the clipboard, UIA
+`RangeFromPoint` maps the press and release points to characters, so a repeated word is told apart. Used only on
+one line (the user's choice) inside Claude Code's input box (❯ line with a ─ rule above and one below; a past
+prompt in the transcript has no rules). A drag does not move Claude Code's cursor; the edit clicks just right of
+the last selected character (the cursor lands after it), presses Backspace for its length, then pastes. Forgotten
+on any key, click or window switch. Codex (› prompt, no rules) and Antigravity are not supported yet.
 
 Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency + POS) indexed by fuzzy toneless pinyin,
 cached in DATA_DIR/cache (build ~15s, load ~0.5s). Menu order: the second model's version of the word (when it
@@ -104,7 +110,8 @@ pasted first and never the replaced text.
 
 The menu (`picker.py`) is a non-activating window. Speech never answers it: short answers (對, 第二個) were often
 misheard. The user clicks a row; a context hotword question has a last row 保留「X」 (what saying 不用 used to do);
-✕ or the timeout just closes it. A white-gray bar along the bottom edge counts the timeout down (2026-09-30).
+✕ or the timeout just closes it. A white-gray bar along the bottom edge counts the timeout down (2026-09-30). A menu
+for a selection opens below it, or above it when it would run off the bottom of the screen (2026-10-01).
 
 ## Hotwords
 

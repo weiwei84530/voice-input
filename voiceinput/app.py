@@ -35,11 +35,11 @@ from .audio import Recorder
 from .config import Config
 from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, PushToTalk
 from .hotwords import HotwordStore, context_words, worth_learning
-from .output import backspace, paste_text, press_delete
+from .output import backspace, click_at, paste_text, press_delete
 from .overlay import Overlay
 from .picker import Picker
 from .picks import PickHistory
-from .selection import Context, ContextProbe, caret_rect, visible_text
+from .selection import Context, ContextProbe, caret_rect, term_watcher, visible_text
 from .session import Session, foreground, redictation_pair, typed_fix
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -186,18 +186,28 @@ class App(QObject):
     def _on_other_key(self, vk: int):
         """Keyboard hook thread: a key the user pressed (injected keys never get here)."""
         self.session.on_key(vk)
+        term_watcher.forget()
         self.key_typed.emit()
 
     def _watch_mouse(self):
-        """Any click may move the caret, which ends what session.py knows about the text before it."""
+        """Any click may move the caret, which ends what session.py knows about the text before it. Left button
+        drags may select text in a terminal (selection.TermWatcher). Our own clicks (injected) are skipped."""
         if sys.platform != "win32":
             return None
         from pynput import mouse
         downs = {0x201, 0x204, 0x207, 0x20B}   # left / right / middle / x button down
 
         def on_event(msg, data):
+            if data.flags & 1:   # LLMHF_INJECTED
+                return False
             if msg in downs:
                 self.session.on_click(data.pt.x, data.pt.y)
+                if msg == 0x201:
+                    term_watcher.mouse_down(data.pt.x, data.pt.y)
+                else:
+                    term_watcher.forget()
+            elif msg == 0x202:
+                term_watcher.mouse_up(data.pt.x, data.pt.y)
             return False   # never passed on to pynput's (unused) callbacks: keeps the hook cheap
         listener = mouse.Listener(win32_event_filter=on_event)
         listener.daemon = True
@@ -345,7 +355,7 @@ class App(QObject):
                 return
             self._close_menu()
             log.info("double tap: delete %r on %s", sel.text, sel.app)
-            press_delete()
+            _delete_selection(sel)
             self.session.replaced_selection(sel.before, sel.text, "", foreground(), f"刪除「{sel.text}」")
             self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
                               "edit": f"刪除「{sel.text}」（快按兩下）"})
@@ -573,7 +583,7 @@ class App(QObject):
         self.overlay.hide_overlay()
         if not rep:
             return
-        paste_text(rep)
+        _paste_over(sel, rep)
         self.session.replaced_selection(sel.before, sel.text, rep, foreground(), f"{sel.text} → {rep}")
         if not sym and edit.similar(sel.text, rep):
             n = len(sel.before)
@@ -632,7 +642,7 @@ class App(QObject):
         if menu[0] == "candidates":
             sel = menu[1]
             log.info("menu pick: %s -> %s", sel.text, word)
-            paste_text(word)
+            _paste_over(sel, word)
             self._learn(*_with_neighbours(sel.before, sel.text, word, sel.after), False,
                         context=_selection_context(sel))
             self.session.replaced_selection(sel.before, sel.text, word, foreground(), f"{sel.text} → {word}")
@@ -788,6 +798,24 @@ def _word_around(text: str, i: int, j: int) -> tuple[int, int]:
             if candidates.pos_tag(text[s:s + n]):
                 return s, s + n
     return i, j
+
+
+def _delete_selection(sel):
+    """Delete the selected text. In a terminal a click right after it moves the cursor there first
+    (selection.TermWatcher), then Backspace removes it."""
+    if sel.click is None:
+        press_delete()
+        return
+    term_watcher.forget()
+    click_at(*sel.click)
+    backspace(len(sel.text))
+
+
+def _paste_over(sel, text: str):
+    """Replace the selected text: a paste replaces a selection, except in a terminal."""
+    if sel.click is not None:
+        _delete_selection(sel)
+    paste_text(text)
 
 
 def _selection_context(sel) -> list[str]:

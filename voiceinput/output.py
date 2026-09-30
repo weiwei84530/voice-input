@@ -57,6 +57,21 @@ def press_delete() -> None:
     _kb.release(keyboard.Key.delete)
 
 
+def click_at(x: int, y: int) -> None:
+    """Left click at a screen point (physical pixels), then put the mouse pointer back. Windows only."""
+    user32 = ctypes.windll.user32
+    old = wt.POINT()
+    user32.GetCursorPos(ctypes.byref(old))
+    user32.SetCursorPos(x, y)
+    events = (_INPUT * 2)()
+    for i, flag in enumerate((0x0002, 0x0004)):   # MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP
+        events[i].type = 0   # INPUT_MOUSE
+        events[i].mi = _MOUSEINPUT(0, 0, 0, flag, 0, None)
+    user32.SendInput(2, events, ctypes.sizeof(_INPUT))
+    time.sleep(0.03)   # let the terminal take the click before the keys that follow
+    user32.SetCursorPos(old.x, old.y)
+
+
 def backspace(n: int) -> None:
     """Press Backspace n times. On Windows all presses go out in one SendInput call so the app receives them
     as one burst, before the paste that usually follows."""

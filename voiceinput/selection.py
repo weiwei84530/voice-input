@@ -1,15 +1,23 @@
 """Read the selected text and its surrounding line in the focused app via Windows UI Automation.
 
 Tested (2026-09-27): Chrome/Edge inputs, Win11 Notepad and LINE expose a TextPattern with the selection and
-its line; the first read in LINE takes ~1.2s, later reads 5-50ms. Terminals expose the selection too, but
-pasting there inserts at the prompt cursor instead of replacing it, so they are treated as "no selection".
+its line; the first read in LINE takes ~1.2s, later reads 5-50ms.
+
+Terminals (2026-09-30): a TUI such as herdr / Claude Code draws its own mouse selection, so Windows Terminal
+reports none, and a paste goes to the app's cursor. A mouse drag there is watched instead (TermWatcher): herdr
+copies the selection, and UIA RangeFromPoint maps the press and release points to the characters under them, so
+the selection's exact place is known (a repeated word included). It is used only when it is on one line of
+Claude Code's input box. To edit it, a click just right of its last character puts Claude Code's cursor there (a
+drag does not move it) and Backspace removes it (Selection.click).
 """
 import ctypes
 import ctypes.wintypes as wt
 import logging
+import queue
 import re
 import sys
 import threading
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -17,7 +25,7 @@ log = logging.getLogger("voiceinput")
 
 _TERMINALS = {"windowsterminal.exe", "conhost.exe", "openconsole.exe", "wezterm-gui.exe", "alacritty.exe",
               "mintty.exe", "tabby.exe", "warp.exe"}
-_LINE, _START, _END = 3, 0, 1
+_CHAR, _LINE, _START, _END = 0, 3, 0, 1
 _local = threading.local()
 
 
@@ -28,6 +36,7 @@ class Selection:
     after: str        # rest of the line after the selection
     app: str          # process name, e.g. chrome.exe
     rect: tuple | None = None   # selection bounds (x, y, w, h) in physical screen pixels
+    click: tuple | None = None  # terminal: screen point whose click puts the cursor right after the selection
 
 
 def _proc_name(pid: int) -> str:
@@ -66,7 +75,7 @@ def read_selection() -> Selection | None:
         el = uia.GetFocusedElement()
         app = _proc_name(el.CurrentProcessId)
         if app in _TERMINALS or el.CurrentClassName == "TermControl":
-            return None
+            return term_watcher.selection()
         pattern = el.GetCurrentPattern(U.UIA_TextPatternId)
         if not pattern:
             return None
@@ -92,6 +101,189 @@ def read_selection() -> Selection | None:
     except Exception:
         log.exception("reading the selection failed")
         return None
+
+
+class TermWatcher:
+    """Selections made by dragging the mouse in a terminal (see the module docstring). The mouse hook reports
+    left button presses and releases; a drag is read on a worker thread and forgotten on the next key press or
+    click, or when another window comes to the front."""
+    _WAIT = 0.6        # seconds a drag may take to reach the clipboard
+    _PROMPT = "❯"      # Claude Code's input line
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._gen = 0
+        self._sel: Selection | None = None
+        self._hwnd = 0
+        self._ready = threading.Event()
+        self._ready.set()
+        self._down = None
+        self._jobs: queue.Queue | None = None
+
+    def forget(self):
+        with self._lock:
+            self._gen += 1
+            self._sel = None
+            self._ready.set()
+
+    def mouse_down(self, x: int, y: int):
+        self.forget()
+        self._down = (x, y, ctypes.windll.user32.GetClipboardSequenceNumber())
+
+    def mouse_up(self, x: int, y: int):
+        down, self._down = self._down, None
+        if down is None or abs(down[0] - x) + abs(down[1] - y) <= 4:
+            return
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if _proc_name(_window_pid(hwnd)) not in _TERMINALS:
+            return
+        with self._lock:
+            gen = self._gen
+            self._ready.clear()
+        if self._jobs is None:
+            self._jobs = queue.Queue()
+            threading.Thread(target=self._run, daemon=True).start()
+        self._jobs.put((gen, hwnd, down[:2], (x, y), down[2]))
+
+    def selection(self) -> Selection | None:
+        """The current terminal selection; waits for a drag that is still being read."""
+        self._ready.wait(self._WAIT + 0.5)
+        with self._lock:
+            if self._sel is not None and self._hwnd == ctypes.windll.user32.GetForegroundWindow():
+                return self._sel
+        return None
+
+    def _run(self):
+        while True:
+            gen, hwnd, down, up, seq = self._jobs.get()
+            sel = None
+            try:
+                sel = self._read(down, up, seq)
+            except Exception:
+                log.exception("reading the terminal selection failed")
+            with self._lock:
+                if gen == self._gen:
+                    self._sel, self._hwnd = sel, hwnd
+                    self._ready.set()
+
+    def _read(self, down, up, seq) -> Selection | None:
+        user32 = ctypes.windll.user32
+        end = time.monotonic() + self._WAIT
+        while user32.GetClipboardSequenceNumber() == seq:
+            if time.monotonic() > end:
+                return None       # nothing copied: no selection, or a terminal app that does not copy
+            time.sleep(0.03)
+        text = _clipboard_text()
+        if not text or "\n" in text or "\r" in text:
+            return None           # one line only (decided 2026-09-30)
+        uia, U = _uia()
+        ends = []
+        for x, y in (down, up):
+            pt = wt.POINT(x, y)
+            el = uia.ElementFromPoint(pt)
+            if el.CurrentClassName != "TermControl":
+                return None
+            pattern = el.GetCurrentPattern(U.UIA_TextPatternId).QueryInterface(U.IUIAutomationTextPattern)
+            ch = pattern.RangeFromPoint(pt)
+            ch.ExpandToEnclosingUnit(_CHAR)
+            line = ch.Clone()
+            line.ExpandToEnclosingUnit(_LINE)
+            before = line.Clone()
+            before.MoveEndpointByRange(_END, ch, _START)
+            ends.append((len(before.GetText(-1)), line))
+        (c1, line), (c2, line2) = ends
+        if not line.Compare(line2):
+            return None
+        row = line.GetText(-1).rstrip("\r\n")
+        a, b = min(c1, c2), max(c1, c2) + 1
+        # a release past the end of the text selects blanks that the copy leaves out
+        if row[a:a + len(text)] != text or row[a + len(text):b].strip():
+            log.info("terminal selection %r does not match the screen %r", text, row[a:b])
+            return None
+        b = a + len(text)
+        p = self._input_start(row, line, a)
+        if p is None:
+            log.info("terminal selection %r is not in Claude Code's input box", text)
+            return None
+        first, last = _char_rect(line, a), _char_rect(line, b - 1)
+        rect = (first[0], first[1], last[0] + last[2] - first[0], first[3])
+        click = (last[0] + last[2] + 3, last[1] + last[3] // 2)
+        log.info("terminal selection %r after %r", text, row[p:a])
+        return Selection(text, row[p:a], row[b:].rstrip(), "terminal", rect, click)
+
+    def _input_start(self, row: str, line, a: int) -> int | None:
+        """Where the text of Claude Code's input box starts on this row (after "❯ " or the continuation indent),
+        or None when the row is outside the input box: it needs a rule (─) above its prompt line and one below
+        its last line. A past prompt in the transcript also starts with ❯ but has no rules around it."""
+        rows = [row[:a]] + _lines(line, -1, 30)
+        i = next((k for k, r in enumerate(rows) if self._PROMPT in r), None)
+        if i is None or i + 1 >= len(rows):
+            return None
+        col = rows[i].rindex(self._PROMPT)
+
+        def blank(r):
+            return r[col:col + 2].strip() == ""
+        if not all(blank(r) for r in rows[:i]) or rows[i + 1][col:col + 1] != "─":
+            return None
+        for r in _lines(line, 1, 30):
+            if r[col:col + 1] == "─":
+                return col + 2
+            if not blank(r):
+                return None
+        return None
+
+
+term_watcher = TermWatcher()
+
+
+def _window_pid(hwnd: int) -> int:
+    pid = wt.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def _lines(line, step: int, n: int) -> list[str]:
+    """Up to n rows above (step -1) or below (step 1) a line range, nearest first."""
+    r, out = line.Clone(), []
+    for _ in range(n):
+        if r.Move(_LINE, step) == 0:
+            break
+        r.ExpandToEnclosingUnit(_LINE)
+        out.append(r.GetText(-1).rstrip("\r\n"))
+    return out
+
+
+def _char_rect(line, i: int) -> tuple:
+    """Screen rect (x, y, w, h) of character i of a line range."""
+    r = line.Clone()
+    r.MoveEndpointByUnit(_START, _CHAR, i)
+    r.MoveEndpointByRange(_END, r, _START)
+    r.MoveEndpointByUnit(_END, _CHAR, 1)
+    rect = r.GetBoundingRectangles()
+    return tuple(int(v) for v in rect[:4])
+
+
+def _clipboard_text() -> str:
+    user32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    k32.GlobalLock.restype = ctypes.c_void_p
+    for _ in range(10):
+        if user32.OpenClipboard(None):
+            break
+        time.sleep(0.02)
+    else:
+        return ""
+    try:
+        h = user32.GetClipboardData(13)  # CF_UNICODETEXT
+        if not h:
+            return ""
+        ptr = k32.GlobalLock(ctypes.c_void_p(h))
+        try:
+            return ctypes.wstring_at(ptr) if ptr else ""
+        finally:
+            k32.GlobalUnlock(ctypes.c_void_p(h))
+    finally:
+        user32.CloseClipboard()
 
 
 # English terms on screen bias the recognizer toward them (worktree, LLM, sherpa-onnx in a terminal).
