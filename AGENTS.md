@@ -145,7 +145,7 @@ removed the same day they were built: the user corrects by selecting with the mo
 - **Double tap of the hotkey (`hotkey.py`)**, nothing selected, undoes the last change (dictation, replaced
   selection, picked suggestion); holding the second press records again, so it becomes a re-dictation. CapsLock: the
   two replayed taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
-  Recording starts at key-down, but the indicator (overlay, tray icon) only after 0.2s (0.3s = TAP_THRESHOLD
+  Recording starts at key-down, but the indicator (overlay, tray icon) only after 0.1s (0.3s = TAP_THRESHOLD, then 0.2s,
   felt slow), so taps and double taps do not flash it.
 - **Re-dictation**: dictation deleted (Backspace/Delete without typing, or double tap) and re-said within 45s → one
   changed word that sounds alike (widened to the dictionary word around it: 黨案 → 檔案) gets the candidate menu.
