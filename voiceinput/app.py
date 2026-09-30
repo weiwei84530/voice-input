@@ -133,6 +133,7 @@ class App(QObject):
 
         self.overlay = Overlay(lambda: self.recorder.level)
         self.picker = Picker()
+        self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.confirmed.connect(self.on_learn_confirmed)
         self.picker.declined.connect(self.on_menu_declined)
@@ -448,10 +449,10 @@ class App(QObject):
         log.info("offer: %s -> %s%s", sus.word, sus.options, " (context hotword)" if sus.hotword else "")
         self._menu = ("suspect", u, sus)
         if sus.hotword is not None:
-            self.picker.show_list(f"「{sus.word}」換成？", sus.options, caret_rect(), timeout_ms=15_000,
+            self.picker.show_list(f"「{sus.word}」換成？", sus.options, caret_rect(),
                                   keep=f"保留「{sus.word}」")
         else:
-            self.picker.show_list(f"可能聽錯「{sus.word}」", sus.options, caret_rect(), timeout_ms=15_000)
+            self.picker.show_list(f"可能聽錯「{sus.word}」", sus.options, caret_rect())
         s.ignore_rects = [self.picker.physical_rect()]
 
     # --- undo (double tap) ---
@@ -602,8 +603,7 @@ class App(QObject):
             return
         log.info("fix menu: %s (was %s): %s", fix.new, fix.old, rows)
         self._menu = ("fix", fix)
-        self.picker.show_list(f"選字：{fix.new}（原本「{fix.old}」）", rows, fix.rect or caret_rect(),
-                              timeout_ms=15_000)
+        self.picker.show_list(f"選字：{fix.new}（原本「{fix.old}」）", rows, fix.rect or caret_rect())
         s.ignore_rects = [self.picker.physical_rect()]
 
     def on_candidates(self, sel, words: list):
@@ -741,6 +741,7 @@ class App(QObject):
 
     def apply_settings(self):
         self.ptt.set_key(self.cfg.hotkey)
+        self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         self._set_autostart()
 
     def _set_autostart(self):

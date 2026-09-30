@@ -30,7 +30,7 @@ macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Moni
 - Double-tap the hotkey to undo what you just dictated; hold the second press to say it again.
 - Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark.
 - Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login,
-  hotwords) and a per-utterance log for this session. Changes apply immediately.
+  how long menus stay open, hotwords) and a per-utterance log for this session. Changes apply immediately.
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 
 ## Correcting

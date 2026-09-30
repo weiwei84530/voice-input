@@ -66,7 +66,8 @@ CJK/ASCII spacing → trailing punctuation.
 
 ## Settings (2026-09-29)
 
-Only microphone, hotkey, strip trailing punctuation, autostart and the hotwords page (cards in two columns). The
+Only microphone, hotkey, strip trailing punctuation, autostart, menu timeout (one value for every menu and the ✓
+box, default 10s, added 2026-09-30) and the hotwords page (cards in two columns). The
 刪除 / 選字 trigger-word lists were removed 2026-09-30 with the spoken triggers. Selection edits, the second
 opinion and on-screen terms are always on.
 
@@ -105,7 +106,7 @@ misheard. The user clicks a row; a context hotword question has a last row 保�
 Every replacement that looks like a correction is offered as a hotword (`hotwords.json` in DATA_DIR, key = wrong
 text, value = correction) in a small box with a ✓ button; it is added only when the user clicks ✓ (decided
 2026-09-29, replacing "add, then offer undo"; speech never answers this box so the next utterance cannot confirm it
-by accident, and ✕ or 15s declines). Offered when: Chinese words of 2+ characters whose syllables all match (fuzzy zh/z, ing/in, l/n …;
+by accident, and ✕ or the menu timeout declines). Offered when: Chinese words of 2+ characters whose syllables all match (fuzzy zh/z, ing/in, l/n …;
 4+ characters may differ in one), or similar Latin spelling. A one-character
 fix is learned with its neighbours (張雨薇: 雨 → 育 is stored as 張雨薇 → 張育薇). An existing hotword is never
 overwritten by a different value (picking 乘勢 for 城市 in one sentence must not replace 城市 → 程式); that

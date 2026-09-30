@@ -3,7 +3,7 @@ import html
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QStackedWidget,
+                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QStackedWidget,
                                QTextBrowser, QVBoxLayout, QWidget)
 
 from . import audio, hotwords
@@ -38,6 +38,9 @@ class SettingsDialog(QDialog):
 
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
+        self.menu_seconds = QSpinBox(minimum=3, maximum=120, suffix=" 秒")
+        self.menu_seconds.setToolTip("選字選單、建議選單和加入熱詞的 ✓ 框，沒點的話幾秒後自動關閉")
+        self.menu_seconds.valueChanged.connect(self._apply)
         hotwords_btn = QPushButton("管理熱詞…", clicked=lambda: self._show_page(1))
         hotwords_row = QHBoxLayout()
         hotwords_row.addWidget(hotwords_btn)
@@ -57,6 +60,7 @@ class SettingsDialog(QDialog):
         form.addRow("", hotkey_note)
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
+        form.addRow("選單自動關閉", self.menu_seconds)
         form.addRow("熱詞", hotwords_row)
 
         left = QVBoxLayout()
@@ -100,6 +104,7 @@ class SettingsDialog(QDialog):
         self._select(self.hotkey, self.cfg.hotkey)
         self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
         self.autostart.setChecked(self.cfg.autostart)
+        self.menu_seconds.setValue(self.cfg.menu_seconds)
         self._loading = False
 
     def set_status(self, text: str):
@@ -136,6 +141,7 @@ class SettingsDialog(QDialog):
         self.cfg.hotkey = self.hotkey.currentData()
         self.cfg.strip_trailing_punct = self.strip_punct.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
+        self.cfg.menu_seconds = self.menu_seconds.value()
         self.cfg.save()
         self.applied.emit()
 

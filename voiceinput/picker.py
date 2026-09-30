@@ -61,7 +61,8 @@ class Picker(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.candidates: list[str] = []
-        self._timer = QTimer(self, singleShot=True, interval=30_000, timeout=self.hide)
+        self.timeout_ms = 10_000    # every menu closes after this (a setting)
+        self._timer = QTimer(self, singleShot=True, interval=self.timeout_ms, timeout=self.hide)
         self._tick = QTimer(self, interval=40, timeout=self._countdown)
         self._deadline = self._total = 0.0
 
@@ -95,7 +96,7 @@ class Picker(QWidget):
         if self.isVisible():
             self._clamp()
 
-    def show_list(self, title: str, words: list[str], rect, timeout_ms: int = 30_000, keep: str = ""):
+    def show_list(self, title: str, words: list[str], rect, keep: str = ""):
         """A list of choices with its own title. rect as in _place; None puts it above the recording indicator.
         keep adds a last row that emits declined (e.g. 保留「城市」)."""
         self.candidates = words
@@ -103,10 +104,10 @@ class Picker(QWidget):
         if keep:
             self.rows.addWidget(QPushButton(keep, objectName="keep", clicked=self._decline))
             self._shrink()
-        self._start_timer(timeout_ms)
+        self._start_timer(self.timeout_ms)
         self._place(rect, bottom=True)
 
-    def show_confirm(self, title: str, text: str, rect, timeout_ms: int = 15_000):
+    def show_confirm(self, title: str, text: str, rect):
         """A yes/no box: title, text and a ✓ button. Only a click on ✓ confirms; ✕ or the timeout declines."""
         self.candidates = []
         self._clear()
@@ -118,7 +119,7 @@ class Picker(QWidget):
         h.addWidget(QPushButton("✓", objectName="tick", clicked=self._confirm))
         self.rows.addWidget(row)
         self._shrink()
-        self._start_timer(timeout_ms)
+        self._start_timer(self.timeout_ms)
         self._place(rect, bottom=True)
 
     def _start_timer(self, ms: int):
@@ -161,7 +162,7 @@ class Picker(QWidget):
         for i, word in enumerate(candidates):
             self.rows.addWidget(QPushButton(word, clicked=lambda _=False, i=i: self._pick(i)))
         self._shrink()
-        self._start_timer(30_000)
+        self._start_timer(self.timeout_ms)
 
     def _pick(self, i: int):
         self.hide()
