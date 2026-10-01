@@ -90,14 +90,19 @@ single tap is replayed at once (typing right after a CapsLock tap must not wait 
 the probe finds a selection; other hotkeys are replayed only when there is no selection. Spelling letters,
 教育的育, 改成X, 大寫/小寫 were removed: the user prefers selecting with the mouse and picking.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
-Terminals: Claude Code in Windows Terminal hides its mouse selection from UIA, Shift+arrow does not select, and a
-paste goes to the caret. Since 2026-10-01 a mouse drag there works like a selection anywhere else
-(`selection.TermWatcher`, probed with `dev/term_probe.py`): herdr copies the selection to the clipboard, UIA
-`RangeFromPoint` maps the press and release points to characters, so a repeated word is told apart. Used only on
-one line (the user's choice) inside Claude Code's input box (❯ line with a ─ rule above and one below; a past
-prompt in the transcript has no rules). A drag does not move Claude Code's cursor; the edit clicks just right of
-the last selected character (the cursor lands after it), presses Backspace for its length, then pastes. Forgotten
-on any key, click or window switch. Codex (› prompt, no rules) and Antigravity are not supported yet.
+Terminals: Claude Code / Codex / agy in Windows Terminal (inside herdr) hide their mouse selection from UIA,
+Shift+arrow does not select, and a paste goes to the caret. Since 2026-10-01 a mouse drag there works like a
+selection anywhere else (`selection.TermWatcher`, probed with `dev/term_probe.py`): UIA `RangeFromPoint` maps the
+press and release points to characters and the text between them is read from the screen (no clipboard since
+2026-10-02: the user keeps herdr's `copy_on_select` off), so a repeated word is told apart. Used only on one line
+(the user's choice) of the input box: a row starting with ❯ / › / > at the pane's left edge plus the rows below it
+indented under the prompt, and the terminal cursor must be in that box (a past prompt in the transcript and status
+lines are rejected). Keyboard only since 2026-10-02 (clicks misplaced Codex's cursor, agy ignores them):
+WT reports its cursor as an empty UIA selection, so arrow keys move it (Up/Down to the row, then Left/Right),
+re-reading it after each burst, until it sits right after the selection; then Backspace 20ms apart (a burst lost
+one in Codex) and paste. If the cursor cannot get there nothing is deleted and a notice says so. Tested with
+herdr-driven panes in all three tools: soft-wrapped rows, other lines, cursor starting anywhere. In the background
+WT reported the cursor one character left; in front it is exact. Forgotten on any key, click or window switch.
 
 Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency + POS) indexed by fuzzy toneless pinyin,
 cached in DATA_DIR/cache (build ~15s, load ~0.5s). Menu order: the second model's version of the word (when it

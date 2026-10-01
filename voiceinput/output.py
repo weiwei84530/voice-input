@@ -57,36 +57,39 @@ def press_delete() -> None:
     _kb.release(keyboard.Key.delete)
 
 
-def click_at(x: int, y: int) -> None:
-    """Left click at a screen point (physical pixels), then put the mouse pointer back. Windows only."""
-    user32 = ctypes.windll.user32
-    old = wt.POINT()
-    user32.GetCursorPos(ctypes.byref(old))
-    user32.SetCursorPos(x, y)
-    events = (_INPUT * 2)()
-    for i, flag in enumerate((0x0002, 0x0004)):   # MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP
-        events[i].type = 0   # INPUT_MOUSE
-        events[i].mi = _MOUSEINPUT(0, 0, 0, flag, 0, None)
-    user32.SendInput(2, events, ctypes.sizeof(_INPUT))
-    time.sleep(0.03)   # let the terminal take the click before the keys that follow
-    user32.SetCursorPos(old.x, old.y)
+ARROWS = {"left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
+_PYNPUT_ARROWS = {0x25: keyboard.Key.left, 0x26: keyboard.Key.up, 0x27: keyboard.Key.right,
+                  0x28: keyboard.Key.down}
 
 
-def backspace(n: int) -> None:
-    """Press Backspace n times. On Windows all presses go out in one SendInput call so the app receives them
+def press_key(vk: int, n: int) -> None:
+    """Press a key n times. On Windows all presses go out in one SendInput call so the app receives them
     as one burst, before the paste that usually follows."""
     if n <= 0:
         return
     if sys.platform != "win32":
+        key = _PYNPUT_ARROWS.get(vk, keyboard.Key.backspace)
         for _ in range(n):
-            _kb.press(keyboard.Key.backspace)
-            _kb.release(keyboard.Key.backspace)
+            _kb.press(key)
+            _kb.release(key)
         return
+    ext = 1 if vk in _PYNPUT_ARROWS else 0   # KEYEVENTF_EXTENDEDKEY: the arrow keys, not the keypad's
     events = (_INPUT * (2 * n))()
     for i in range(2 * n):
         events[i].type = 1   # INPUT_KEYBOARD
-        events[i].ki = _KEYBDINPUT(0x08, 0, 2 if i % 2 else 0, 0, None)   # VK_BACK, KEYEVENTF_KEYUP on odd
+        events[i].ki = _KEYBDINPUT(vk, 0, ext | (2 if i % 2 else 0), 0, None)   # KEYEVENTF_KEYUP on odd
     ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
+
+
+def backspace(n: int, gap: float = 0.0) -> None:
+    """gap: seconds between presses. Codex in a terminal dropped one of a burst of Backspaces after some
+    text (abc_ascii, 2026-10-02); 20ms apart none were lost."""
+    if not gap:
+        press_key(0x08, n)   # VK_BACK
+        return
+    for _ in range(n):
+        press_key(0x08, 1)
+        time.sleep(gap)
 
 
 if sys.platform == "win32":
@@ -96,7 +99,7 @@ if sys.platform == "win32":
         _fields_ = [("wVk", wt.WORD), ("wScan", wt.WORD), ("dwFlags", wt.DWORD), ("time", wt.DWORD),
                     ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
 
-    class _MOUSEINPUT(ctypes.Structure):
+    class _MOUSEINPUT(ctypes.Structure):   # only sizes the union like the real INPUT
         _fields_ = [("dx", wt.LONG), ("dy", wt.LONG), ("mouseData", wt.DWORD), ("dwFlags", wt.DWORD),
                     ("time", wt.DWORD), ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
 

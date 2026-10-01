@@ -35,11 +35,11 @@ from .audio import Recorder
 from .config import Config
 from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, PushToTalk
 from .hotwords import HotwordStore, context_words, worth_learning
-from .output import backspace, click_at, paste_text, press_delete
+from .output import backspace, paste_text, press_delete
 from .overlay import Overlay
 from .picker import Picker
 from .picks import PickHistory
-from .selection import Context, ContextProbe, caret_rect, term_watcher, visible_text
+from .selection import Context, ContextProbe, caret_rect, move_cursor_after, term_watcher, visible_text
 from .session import Session, foreground, redictation_pair, typed_fix
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -51,6 +51,7 @@ _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
 _FIX_IDLE_MS = 3000        # after the user stops typing, look for a hand-made correction of the dictation
 _FIX_WINDOW = 120.0        # seconds after a dictation during which hand-made corrections are looked for
 _MENU_ROWS = 8
+_SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection that moved or the cursor could not reach
 _INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
 
 
@@ -355,7 +356,10 @@ class App(QObject):
                 return
             self._close_menu()
             log.info("double tap: delete %r on %s", sel.text, sel.app)
-            _delete_selection(sel)
+            if not _delete_selection(sel):
+                press.deleted = None   # a held second press then pastes a plain dictation
+                self._notify(_SEL_LOST)
+                return
             self.session.replaced_selection(sel.before, sel.text, "", foreground(), f"刪除「{sel.text}」")
             self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
                               "edit": f"刪除「{sel.text}」（快按兩下）"})
@@ -583,7 +587,9 @@ class App(QObject):
         self.overlay.hide_overlay()
         if not rep:
             return
-        _paste_over(sel, rep)
+        if not _paste_over(sel, rep):
+            self._notify(_SEL_LOST)
+            return
         self.session.replaced_selection(sel.before, sel.text, rep, foreground(), f"{sel.text} → {rep}")
         if not sym and edit.similar(sel.text, rep):
             n = len(sel.before)
@@ -642,7 +648,9 @@ class App(QObject):
         if menu[0] == "candidates":
             sel = menu[1]
             log.info("menu pick: %s -> %s", sel.text, word)
-            _paste_over(sel, word)
+            if not _paste_over(sel, word):
+                self._notify(_SEL_LOST)
+                return
             self._learn(*_with_neighbours(sel.before, sel.text, word, sel.after), False,
                         context=_selection_context(sel))
             self.session.replaced_selection(sel.before, sel.text, word, foreground(), f"{sel.text} → {word}")
@@ -800,22 +808,25 @@ def _word_around(text: str, i: int, j: int) -> tuple[int, int]:
     return i, j
 
 
-def _delete_selection(sel):
-    """Delete the selected text. In a terminal a click right after it moves the cursor there first
-    (selection.TermWatcher), then Backspace removes it."""
-    if sel.click is None:
+def _delete_selection(sel) -> bool:
+    """Delete the selected text. In a terminal arrow keys move the cursor right after it first
+    (selection.move_cursor_after), then Backspace removes it. False when that failed and nothing changed."""
+    if sel.term is None:
         press_delete()
-        return
+        return True
     term_watcher.forget()
-    click_at(*sel.click)
-    backspace(len(sel.text))
+    if not move_cursor_after(sel):
+        return False
+    backspace(len(sel.text), gap=0.02)
+    return True
 
 
-def _paste_over(sel, text: str):
+def _paste_over(sel, text: str) -> bool:
     """Replace the selected text: a paste replaces a selection, except in a terminal."""
-    if sel.click is not None:
-        _delete_selection(sel)
+    if sel.term is not None and not _delete_selection(sel):
+        return False
     paste_text(text)
+    return True
 
 
 def _selection_context(sel) -> list[str]:
