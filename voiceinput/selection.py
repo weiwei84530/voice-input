@@ -193,7 +193,7 @@ class TermWatcher:
         first, last = _char_rect(line, a), _char_rect(line, b - 1)
         rect = (first[0], first[1], last[0] + last[2] - first[0], first[3])
         point = (last[0] + last[2] // 2, last[1] + last[3] // 2)
-        log.info("terminal selection %r after %r", text, row[p:a])
+        log.info("terminal selection %r after %r (drag %s)", text, row[p:a], "right" if c2 >= c1 else "left")
         return Selection(text, row[p:a], row[b:].rstrip(), "terminal", rect, point)
 
     def _input_start(self, row: str, line, a: int, cursor) -> int | None:
@@ -250,10 +250,16 @@ def _move_after(sel: Selection) -> bool:
             return False
         end = time.monotonic() + 3.0
         cur = _term_cursor(pattern)
+        if cur is not None and cur[1] == col and _rows_between(cur[0], line) == 0:
+            # A drag ending here left the cursor here, and Codex keeps that selection: a Backspace would delete
+            # all of it, the next one a character more. An arrow key clears it; the loop moves back.
+            press_key(ARROWS["left"], 1)
+            cur = _cursor_moved(pattern, cur, time.monotonic() + 0.5)
         for _ in range(12):
             if cur is None or time.monotonic() > end:
                 break
             dr = _rows_between(cur[0], line)
+            log.info("terminal cursor: %s rows, column %d (target %d)", dr, cur[1], col)
             if dr is None:
                 break
             if dr == 0 and cur[1] == col:

@@ -107,7 +107,9 @@ selection anywhere else (`selection.TermWatcher`, probed with `dev/term_probe.py
 press and release points to characters and the text between them is read from the screen (no clipboard since
 2026-10-02: the user keeps herdr's `copy_on_select` off), so a repeated word is told apart. herdr selects up to the cell edge nearest the pointer, so the
 character under an end point is often not selected: the ends are narrowed to the cells herdr highlighted (inverted
-colors, read as UIA cell attributes; 2026-10-03). Used only on one line
+colors, read as UIA cell attributes; 2026-10-03). Codex keeps a drag as its own selection, and a left-to-right drag
+leaves the cursor right after it, so a Backspace there would delete the whole selection and the next one a
+character more: when the cursor already sits there, one Left key clears it first. Used only on one line
 (the user's choice) of the input box: a row starting with ❯ / › / > at the pane's left edge plus the rows below it
 indented under the prompt, and the terminal cursor must be in that box (a past prompt in the transcript and status
 lines are rejected). Keyboard only since 2026-10-02 (clicks misplaced Codex's cursor, agy ignores them):
