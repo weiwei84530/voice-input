@@ -1,7 +1,10 @@
 """Text formatting applied to every result (after ASR, before hotwords)."""
+import logging
 import re
 
 import opencc
+
+log = logging.getLogger("voiceinput")
 
 _s2tw = opencc.OpenCC("s2tw")  # glyphs only; s2twp would also swap vocabulary (程序 -> 程式)
 _t2s = opencc.OpenCC("t2s")
@@ -60,33 +63,84 @@ _TRAILING_PUNCT = re.compile(r"[。，,.]+$")
 _FILLER = re.compile(r"[嗯呃]+[，,、。]?\s*")
 
 # Disfluencies (2026-09-29, from the user's log: 我們我們明天見, 你可不可不可以, 今天今天, 先打開那個，先打開設定頁).
-# Repeated 2-4 character chunks are removed unless they are ABAB reduplication (研究研究, 討論討論: verbs and
-# adjectives by jieba's POS tags), counting (一個一個) or laughter-like (哈哈哈哈).
+# Repeated 2-4 character chunks are removed unless they are ABAB reduplication (研究研究, 討論討論: listed in the
+# dictionary or in _ABAB), counting (一個一個) or laughter-like (哈哈哈哈). A-not-A (是不是不會, 能不能不用) is
+# a repeat only when the A comes a third time (可不可不可以). Single repeated characters (選選字, 預預期, 很很) are
+# judged by the dictionary in _dedupe_chars (2026-10-02).
 _REPEAT = re.compile(rf"([{CJK}]{{2,4}})\1")
 _RESTART = re.compile(rf"([{CJK}]{{3,6}})(?:那個|這個|就是)?[，,、 ]*\1")
-_STUTTER = re.compile(r"([我你他她它就先把這那要會])\1(?!\1)")
+_STUTTER = re.compile(r"([我你他她它就先把這那要會])\1(?!\1)")   # works before the dictionary has loaded
+_CJK_CHAR = re.compile(f"[{CJK}]")
 _DISFLUENT = set("還有 就是 然後 那個 這個 所以 因為 但是 如果 我們 你們 他們 我想 我要 你要 應該 可以 今天 明天 "
-                 "現在 其實 反正 不過 而且 可是 我覺得 就是說".split())
+                 "現在 其實 反正 不過 而且 可是 還是 或是 我覺得 就是說".split())
 _KEEP_REPEAT = set("好的 對啊 是的 沒錯 謝謝 拜拜".split())
-_ABAB_POS = {"v", "vd", "vn", "vi", "a", "ad", "an", "z"}
+# Verbs and adjectives said twice on purpose (討論討論 = discuss a bit) that the dictionary does not list as ABAB
+_ABAB = set("討論 休息 檢查 了解 瞭解 學習 練習 準備 打掃 整理 研究 考慮 商量 介紹 說明 認識 收拾 活動 放鬆 輕鬆 "
+            "熱鬧 高興 開心 溝通 比較 參考 思考 測試 觀察 體驗 欣賞 運動 散步 交流 調整 反省 檢討 討教 請教 "
+            "涼快 暖和 舒服 乾淨 清楚 明白 快樂".split())
+_CHAR_KEEP = set("在") | set(NUM)   # 現在在猶豫: 在 is a word after 現在; numbers are not stutters
+_PREFER_RATIO = 20   # 選選字: the pair is a rare word, the first character + the next one is much more common
 
 
 def _dedupe_repeat(m) -> str:
     x = m.group(1)
     if x in _KEEP_REPEAT or len(set(x)) == 1 or x[0] in NUM or x[0] == "每":
         return m.group(0)
+    if len(x) == 2 and x[1] in "不沒" and m.string[m.end():m.end() + 1] != x[0]:
+        return m.group(0)                        # 是不是不會, 有沒有沒: A-not-A followed by another word
     if x not in _DISFLUENT:
-        from .candidates import pos_tag   # lazy: candidates imports this module
-        tag = pos_tag(x)
-        if tag is None or tag in _ABAB_POS:   # None: dictionary not loaded yet, keep to be safe
+        from .candidates import is_word         # lazy: textfmt is imported before the dictionary is needed
+        known = is_word(x + x)
+        if known is None or known or x in _ABAB:   # None: dictionary not loaded yet, keep to be safe
             return m.group(0)
     return x
 
 
+def _dedupe_chars(text: str) -> str:
+    """Drop one of two identical characters when they do not belong to a word: 選選字 -> 選字, 很很 -> 很,
+    but 剛剛, 框框, 渾渾噩噩, 試試看 (dictionary words), 髒髒的 (AA的), 開關關掉 (two words) stay."""
+    from .candidates import frequency, is_word
+    if is_word("的") is None:
+        return text
+    out, i = [], 0
+    while i < len(text):
+        x = text[i]
+        if (i + 1 < len(text) and text[i + 1] == x and _CJK_CHAR.match(x) and x not in _CHAR_KEEP
+                and text[i - 1:i] != x and text[i + 2:i + 3] != x and not _keep_pair(text, i, frequency, is_word)):
+            out.append(x)
+            log.info("stutter: %s -> %s", text[max(0, i - 2):i + 4], text[max(0, i - 2):i + 1] + text[i + 2:i + 4])
+            i += 2
+            continue
+        out.append(x)
+        i += 1
+    return "".join(out)
+
+
+def _keep_pair(text: str, i: int, frequency, is_word) -> bool:
+    if text[i + 2:i + 3] in ("的", "地"):
+        return True                              # 髒髒的, 慢慢地
+    if i > 0 and is_word(text[i - 1:i + 1]) and is_word(text[i + 1:i + 3]):
+        return True                              # 開關|關掉, 小時|時間, 勾選|選項
+    best = max((text[s:s + n] for n in (2, 3, 4) for s in range(i + 2 - n, i + 1)
+                if s >= 0 and s + n <= len(text) and is_word(text[s:s + n])), key=frequency, default=None)
+    if best is None:
+        return False
+    if best == text[i:i + 2] and i + 3 <= len(text):
+        after = text[i] + text[i + 2]            # 選選字: 選選 is rare, 選字 is the word meant
+        return not (is_word(after) and frequency(after) >= _PREFER_RATIO * frequency(best))
+    return True
+
+
+def _dedupe_restart(m) -> str:
+    x = m.group(1)
+    return m.group(0) if x[0] in NUM or x[0] == "每" else x   # 一個字一個字 is counting, not a restart
+
+
 def remove_disfluencies(text: str) -> str:
-    text = _RESTART.sub(r"\1", text)
+    text = _RESTART.sub(_dedupe_restart, text)
     text = _REPEAT.sub(_dedupe_repeat, text)
-    return _STUTTER.sub(r"\1", text)
+    text = _STUTTER.sub(r"\1", text)
+    return _dedupe_chars(text)
 
 
 def _parse_section(s: str) -> int | None:

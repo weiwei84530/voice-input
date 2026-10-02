@@ -32,7 +32,7 @@ _TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9]*|[㐀-䶿一-鿿]+")
 def context_words(text: str, start: int, end: int) -> list[str]:
     """Content words within _WINDOW characters of text[start:end]: dictionary words (greedy longest match),
     other single characters and English words, minus function words."""
-    from .candidates import pos_tag
+    from .candidates import is_word
     out = []
     for chunk in (text[max(0, start - _WINDOW):start], text[end:end + _WINDOW]):
         for m in _TOKEN.finditer(chunk):
@@ -44,7 +44,7 @@ def context_words(text: str, start: int, end: int) -> list[str]:
             while i < len(run):
                 for n in (4, 3, 2, 1):
                     w = run[i:i + n]
-                    if len(w) == n and (n == 1 or pos_tag(w)):
+                    if len(w) == n and (n == 1 or is_word(w)):
                         out.append(w)
                         i += n
                         break

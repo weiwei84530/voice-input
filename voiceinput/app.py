@@ -803,7 +803,7 @@ def _word_around(text: str, i: int, j: int) -> tuple[int, int]:
         return i, j
     for n in (4, 3, 2):
         for s in range(max(0, j - n), min(i, len(text) - n) + 1):
-            if candidates.pos_tag(text[s:s + n]):
+            if candidates.is_word(text[s:s + n]):
                 return s, s + n
     return i, j
 

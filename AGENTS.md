@@ -42,7 +42,7 @@ Decided 2026-09-29: the app stays light, with a fixed set of sherpa-onnx models 
 Live captions (streaming X-ASR 480ms, 134MB) were removed 2026-09-29: they appeared too slowly to help; the pill
 shows only the level. Qwen3-ASR 0.6B (840MB, ~4.4s per 18s) and Fun-ASR-Nano (1GB, ~7.5s) were selectable before and
 were removed with the picker. As a second opinion Qwen3-ASR gave better alternatives but took ~1.2GB of the user's 8GB machine.
-Memory with everything on: ~1.1GB (was ~3GB with the LLM). The pinyin index held as Python objects is a large part.
+Memory with everything on: ~1.1GB (was ~3GB with the LLM). The word index held as Python objects is a large part.
 
 ## Text pipeline
 
@@ -55,8 +55,13 @@ CJK/ASCII spacing → trailing punctuation.
 - 嗯 / 呃 are removed by regex.
 - Disfluencies (`remove_disfluencies`, 2026-09-29): repeated 2-4 character chunks (我們我們, 你可不可不可以, 今天今天),
   restarts (先打開那個，先打開設定頁 → 先打開設定頁) and stutters of a few characters (我我, 先先). ABAB reduplication is
-  kept by jieba POS tag (研究研究, 討論討論 are verbs), as are counting (一個一個), laughter and 好的好的. 在 is not a
-  stutter character (現在在猶豫). Over the ~400 logged utterances every change was a real repeat.
+  kept when the dictionary lists it (研究研究) or the word is in `_ABAB` (討論, 休息 …), as are counting (一個一個,
+  一個字一個字), laughter and 好的好的. A-not-A is a repeat only when A comes a third time (可不可不可以 → 可不可以;
+  是不是不會, 能不能不用 stay: before 2026-10-02 they lost 是不 / 能不 and flipped the meaning). 在 is not a stutter
+  character (現在在猶豫). Single repeated characters (2026-10-02, `_dedupe_chars`): one is dropped when the pair is
+  not inside a dictionary word (選選字, 預預期, 很很, 以以及, 不不要); kept: 剛剛, 框框, 渾渾噩噩, 試試看, AA的 (髒髒的),
+  two words sharing the character (開關關掉, 勾選選項), numerals. Each drop is logged as `stutter:`. On the 1204
+  logged sentences 34 change; the only doubtful one is 摸貓貓 → 摸貓 (baby talk not in the dictionary).
 - Numerals: single-character numbers stay Chinese (一個, 兩個計劃, 第二種, 十個) unless part of a decimal,
   percentage or followed by a single letter; multi-character ones become digits (十五 → 15, 七百二十八 → 728).
   Also skipped: `_KEEP_WORDS` (統一, 星期三, 十分 …), ranges like 三四, anything with 幾, fractions.
@@ -104,9 +109,19 @@ one in Codex) and paste. If the cursor cannot get there nothing is deleted and a
 herdr-driven panes in all three tools: soft-wrapped rows, other lines, cursor starting anywhere. In the background
 WT reported the cursor one character left; in front it is exact. Forgotten on any key, click or window switch.
 
-Candidates (`candidates.py`): jieba's dict.txt (349k words + frequency + POS) indexed by fuzzy toneless pinyin,
-cached in DATA_DIR/cache (build ~15s, load ~0.5s). Menu order: the second model's version of the word (when it
-came from a recent dictation), the value of a learned hotword for it, then homophones by exact pinyin and frequency.
+Candidates (`candidates.py`, since 2026-10-02): McBopomofo's word list (MIT, `voiceinput/dict/words.tsv.gz`, built by
+`dev/build_dict.py` from a pinned commit): ~146k Taiwanese phrases + Big5 single characters with Bopomofo readings and
+Taiwanese-corpus frequencies (城市 1902 / 程式 1551; has 實作, 勾選, 函式). Indexed by fuzzy toneless reading under both
+McBopomofo's reading and pypinyin's (垃圾 is listed ㄌㄜˋ ㄙㄜˋ), cached in DATA_DIR/cache/word_index.pkl (build ~10s,
+load ~0.4s). The same list answers `is_word` / `frequency` for disfluencies, suspects, hotword contexts and word
+widening. Menu order: the second model's version of the word (when it came from a recent dictation), the value of a
+learned hotword for it, then homophones: same reading with tones, same without tones, fuzzy (ㄓ/ㄗ, ㄥ/ㄣ …), each
+by frequency (the user's misses are words not in the list, not misheard initials).
+
+jieba (until 2026-10-02, last used in commit 58c1535): dict.txt, 349k mainland words with frequencies and POS tags,
+indexed by fuzzy pinyin. It was dropped because Taiwanese words were missing (實作, 勾選) and frequencies were mainland
+(城市 25084 vs 程式 197). Its POS tags were used only to keep verb/adjective ABAB (now `_ABAB` + dictionary). Bring it
+back as a fallback if fuzzy-reading misses show up.
 Words the user picked in any menu come first when they sound like the word (`picks.py`, DATA_DIR/picks.json, by
 fuzzy syllables, most recent first; decided 2026-09-30). The menu after a sounding-alike replacement lists what was
 pasted first and never the replaced text.
@@ -174,8 +189,8 @@ removed the same day they were built: the user corrects by selecting with the mo
   X-ASR at 1.5: CamelCase / acronyms / digits always, other 5+ letter words if seen twice, dotted names skipped.
 - **Suspects** (`suspects.py`): SenseVoice re-decodes each dictation in the background; where it heard other Chinese
   characters and its version is the likelier word (a dictionary word where ours is not, or ≥20× as frequent), a
-  menu offers it. Words a hotword produced are never offered back (jieba's frequencies are mainland: 城市 25084 vs
-  程式 197). Rare, because both models often share an error (主機版, 剪貼布). Guessing from the dictionary alone was
+  menu offers it. Words a hotword produced are never offered back (a common word can still be the wrong one: 城市 /
+  程式). Rare, because both models often share an error (主機版, 剪貼布). Guessing from the dictionary alone was
   rejected: every flag on 80 real utterances was wrong.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
 - Tests without a microphone, with Windows TTS audio (zh-TW Hanhan voice via `dev/tts.ps1`):

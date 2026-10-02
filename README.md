@@ -85,7 +85,7 @@ voiceinput/
   suspects.py  second-opinion check for misheard words
   selection.py selection / on-screen terms via UI Automation
   hotwords.py  learned corrections; ASR biasing words
-  candidates.py same-sounding words (jieba dictionary)
+  candidates.py same-sounding words (McBopomofo word list)
   picks.py     words picked in menus, listed first next time
   picker.py    candidate / suggestion menu
   overlay.py   floating recording / thinking indicator

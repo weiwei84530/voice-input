@@ -55,7 +55,7 @@ def _word_around(text: str, start: int, end: int) -> tuple[int, int]:
     for size in (2, 3, 4):
         for s in range(max(0, end - size), min(start, len(text) - size) + 1):
             w = text[s:s + size]
-            if re.fullmatch(r"[㐀-䶿一-鿿]+", w) and candidates.pos_tag(w):
+            if re.fullmatch(r"[㐀-䶿一-鿿]+", w) and candidates.is_word(w):
                 return s, s + size
     return start, end
 

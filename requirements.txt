@@ -6,4 +6,3 @@ pynput>=1.8
 opencc>=1.1.9
 pypinyin>=0.51
 comtypes>=1.4; sys_platform == "win32"
-jieba>=0.42
