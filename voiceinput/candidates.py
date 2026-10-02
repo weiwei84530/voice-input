@@ -134,6 +134,9 @@ def _readings(word: str) -> list[str]:
     return [" ".join(_words[c][1][0] if c in _words else _pypinyin_reading(c) for c in word)]
 
 
+loose = True   # also other tones and fuzzy readings (setting loose_homophones); False: the same reading only
+
+
 def homophones(word: str, limit: int = 8) -> list[str]:
     """Words that sound like word (Traditional Chinese), best first; word itself excluded."""
     word = word.strip()
@@ -146,6 +149,6 @@ def homophones(word: str, limit: int = 8) -> list[str]:
         toneless = _TONES.sub("", reading)
         for w, r, freq in index.get(_key(reading), []):
             rank = 0 if r == reading else 1 if _TONES.sub("", r) == toneless else 2
-            if w != word and (w not in found or rank < found[w][0]):
+            if w != word and (loose or rank == 0) and (w not in found or rank < found[w][0]):
                 found[w] = (rank, -freq)
     return sorted(found, key=found.get)[:limit]

@@ -13,6 +13,7 @@ class Config:
     strip_trailing_punct: bool = True  # drop sentence-final 。，,. from the result
     fix_menu: bool = True          # a replacement that sounds alike opens the candidate menu (else the ✓ box)
     menu_seconds: int = 10         # menus and the ✓ box close after this many seconds
+    loose_homophones: bool = True  # menus also list other tones and fuzzy readings (else exact readings only)
 
     @classmethod
     def load(cls) -> "Config":

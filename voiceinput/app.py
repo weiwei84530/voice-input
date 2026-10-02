@@ -136,6 +136,7 @@ class App(QObject):
         self.overlay = Overlay(lambda: self.recorder.level)
         self.picker = Picker()
         self.picker.timeout_ms = self.cfg.menu_seconds * 1000
+        candidates.loose = self.cfg.loose_homophones
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.confirmed.connect(self.on_learn_confirmed)
         self.picker.declined.connect(self.on_menu_declined)
@@ -766,6 +767,7 @@ class App(QObject):
     def apply_settings(self):
         self.ptt.set_key(self.cfg.hotkey)
         self.picker.timeout_ms = self.cfg.menu_seconds * 1000
+        candidates.loose = self.cfg.loose_homophones
         self._set_autostart()
 
     def _set_autostart(self):

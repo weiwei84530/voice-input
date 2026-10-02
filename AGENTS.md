@@ -82,7 +82,8 @@ CJK/ASCII spacing → trailing punctuation.
 
 Only microphone, hotkey, strip trailing punctuation, autostart, "candidate menu for sounding-alike changes" (on by
 default; off → the ✓ box is offered directly, as before 2026-09-30), menu timeout (one value for every menu and the ✓
-box, default 10s, added 2026-09-30) and the hotwords page (cards in two columns). The
+box, default 10s, added 2026-09-30), "menus also list other tones and fuzzy readings" (on by default, added
+2026-10-03; off → `candidates.homophones` lists only the same reading with tones) and the hotwords page (cards in two columns). The
 刪除 / 選字 trigger-word lists were removed 2026-09-30 with the spoken triggers. Selection edits, the second
 opinion and on-screen terms are always on.
 
@@ -104,7 +105,9 @@ Terminals: Claude Code / Codex / agy in Windows Terminal (inside herdr) hide the
 Shift+arrow does not select, and a paste goes to the caret. Since 2026-10-01 a mouse drag there works like a
 selection anywhere else (`selection.TermWatcher`, probed with `dev/term_probe.py`): UIA `RangeFromPoint` maps the
 press and release points to characters and the text between them is read from the screen (no clipboard since
-2026-10-02: the user keeps herdr's `copy_on_select` off), so a repeated word is told apart. Used only on one line
+2026-10-02: the user keeps herdr's `copy_on_select` off), so a repeated word is told apart. herdr selects up to the cell edge nearest the pointer, so the
+character under an end point is often not selected: the ends are narrowed to the cells herdr highlighted (inverted
+colors, read as UIA cell attributes; 2026-10-03). Used only on one line
 (the user's choice) of the input box: a row starting with ❯ / › / > at the pane's left edge plus the rows below it
 indented under the prompt, and the terminal cursor must be in that box (a past prompt in the transcript and status
 lines are rejected). Keyboard only since 2026-10-02 (clicks misplaced Codex's cursor, agy ignores them):
