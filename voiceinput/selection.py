@@ -179,7 +179,7 @@ class TermWatcher:
         if not line.Compare(line2):
             return None           # one line only (decided 2026-09-30)
         row = line.GetText(-1).rstrip("\r\n")
-        a, b = min(c1, c2), max(c1, c2) + 1
+        a, b = _highlighted(line, min(c1, c2), max(c1, c2) + 1, len(row))
         text = row[a:b]
         a += len(text) - len(text.lstrip())   # a drag past the text selects blanks
         text = text.strip()
@@ -349,14 +349,44 @@ def _lines(line, step: int, n: int) -> list[str]:
     return out
 
 
-def _char_rect(line, i: int) -> tuple:
-    """Screen rect (x, y, w, h) of character i of a line range."""
+def _char(line, i: int):
+    """Range of character i of a line range."""
     r = line.Clone()
     r.MoveEndpointByUnit(_START, _CHAR, i)
     r.MoveEndpointByRange(_END, r, _START)
     r.MoveEndpointByUnit(_END, _CHAR, 1)
-    rect = r.GetBoundingRectangles()
+    return r
+
+
+def _char_rect(line, i: int) -> tuple:
+    """Screen rect (x, y, w, h) of character i of a line range."""
+    rect = _char(line, i).GetBoundingRectangles()
     return tuple(int(v) for v in rect[:4])
+
+
+def _highlighted(line, a: int, b: int, n: int) -> tuple[int, int]:
+    """Narrow characters a..b-1 (those under the press and release points and between them) to what the TUI
+    highlighted. herdr selects up to the cell edge nearest the pointer, so the character under an end point is
+    often not selected; it inverts the colors of selected cells, and Windows Terminal reports cell colors via
+    UIA. Ends colored like the characters just outside the drag are dropped (2026-10-03)."""
+    _, U = _uia()
+
+    def style(i):
+        r = _char(line, i)
+        return (r.GetAttributeValue(U.UIA_BackgroundColorAttributeId),
+                r.GetAttributeValue(U.UIA_ForegroundColorAttributeId))
+    try:
+        styles = [style(i) for i in range(a, b)]
+        if len(set(styles)) < 2:
+            return a, b           # nothing to tell apart
+        plain = {style(i) for i in (a - 1, b) if 0 <= i < n}
+        while a < b and styles[0] in plain:
+            a, styles = a + 1, styles[1:]
+        while a < b and styles[-1] in plain:
+            b, styles = b - 1, styles[:-1]
+    except Exception:
+        log.exception("reading the terminal highlight failed")
+    return a, b
 
 
 # English terms on screen bias the recognizer toward them (worktree, LLM, sherpa-onnx in a terminal).

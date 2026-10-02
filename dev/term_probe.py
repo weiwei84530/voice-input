@@ -105,6 +105,10 @@ def worker():
                     say(f"        before={line[:col]!r}")
             except Exception as e:
                 say(f"  {name}: <error {e}>")
+        try:
+            say(f"  colors: {colors(uia, U, *up)}")
+        except Exception as e:
+            say(f"  colors: <error {e}>")
         say(f"  WT selection: {wt_selection(uia, U)!r}")
         clip = clipboard()
         say(f"  clipboard: {clip!r}{'' if clip != clip_before else '  (unchanged)'}")
@@ -113,6 +117,29 @@ def worker():
                 click_after(uia, U, down, up)
             except Exception as e:
                 say(f"  click: <error {e}>")
+
+
+def colors(uia, U, x, y):
+    """Runs of (start column, text, background, foreground) on the line under a point: a TUI's own selection
+    highlight shows up here."""
+    pt = wt.POINT(x, y)
+    pat = uia.ElementFromPoint(pt).GetCurrentPattern(U.UIA_TextPatternId)
+    line = pat.QueryInterface(U.IUIAutomationTextPattern).RangeFromPoint(pt)
+    line.ExpandToEnclosingUnit(_LINE)
+    text = line.GetText(-1).rstrip("\r\n")
+    runs = []
+    for i, c in enumerate(text):
+        r = line.Clone()
+        r.MoveEndpointByUnit(_START, _CHAR, i)
+        r.MoveEndpointByRange(_END, r, _START)
+        r.MoveEndpointByUnit(_END, _CHAR, 1)
+        key = (f"{r.GetAttributeValue(U.UIA_BackgroundColorAttributeId):06x}",
+               f"{r.GetAttributeValue(U.UIA_ForegroundColorAttributeId):06x}")
+        if runs and runs[-1][2:] == key:
+            runs[-1][1] += c
+        else:
+            runs.append([i, c, *key])
+    return [tuple(r) for r in runs if r[1].strip()]
 
 
 def char_rect(uia, U, x, y):
