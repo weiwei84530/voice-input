@@ -117,6 +117,7 @@ class TermWatcher:
         self._ready = threading.Event()
         self._ready.set()
         self._down = None
+        self._clicks = (0, 0.0, None)   # (count, time, point) of the last run of clicks in one place
         self._jobs: queue.Queue | None = None
 
     def forget(self):
@@ -131,8 +132,20 @@ class TermWatcher:
 
     def mouse_up(self, x: int, y: int):
         down, self._down = self._down, None
-        if down is None or abs(down[0] - x) + abs(down[1] - y) <= 4:
+        if down is None:
             return
+        if abs(down[0] - x) + abs(down[1] - y) <= 4:
+            # a double click (Claude Code, agy) or triple click (Codex) selects a line up to punctuation or a space
+            n, t, pt = self._clicks
+            now = time.monotonic()
+            near = pt is not None and abs(pt[0] - x) + abs(pt[1] - y) <= 4
+            n = n + 1 if near and now - t <= ctypes.windll.user32.GetDoubleClickTime() / 1000 else 1
+            self._clicks = (n, now, (x, y))
+            if n < 2:
+                return
+            down = None
+        else:
+            self._clicks = (0, 0.0, None)
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         if _proc_name(_window_pid(hwnd)) not in _TERMINALS:
             return
@@ -157,7 +170,7 @@ class TermWatcher:
             gen, hwnd, down, up = self._jobs.get()
             sel = None
             try:
-                sel = self._read(down, up)
+                sel = self._read(down, up) if down else self._read_click(up)
             except Exception:
                 log.exception("reading the terminal selection failed")
             with self._lock:
@@ -180,6 +193,25 @@ class TermWatcher:
             return None           # one line only (decided 2026-09-30)
         row = line.GetText(-1).rstrip("\r\n")
         a, b = _highlighted(line, min(c1, c2), max(c1, c2) + 1, len(row))
+        return self._make(line, row, a, b, pattern, "drag " + ("right" if c2 >= c1 else "left"))
+
+    def _read_click(self, pt) -> Selection | None:
+        """After a double or triple click: the highlighted run of cells around the click, if any."""
+        pattern = _term_pattern(*pt)
+        if pattern is None:
+            return None
+        ch = pattern.RangeFromPoint(wt.POINT(*pt))
+        ch.ExpandToEnclosingUnit(_CHAR)
+        line, c = _pos(ch)
+        row = line.GetText(-1).rstrip("\r\n")
+        for _ in range(3):        # the TUI may not have drawn it yet
+            run = _highlight_run(line, c, len(row))
+            if run:
+                return self._make(line, row, *run, pattern, f"{self._clicks[0]} clicks")
+            time.sleep(0.1)
+        return None
+
+    def _make(self, line, row, a, b, pattern, how) -> Selection | None:
         text = row[a:b]
         a += len(text) - len(text.lstrip())   # a drag past the text selects blanks
         text = text.strip()
@@ -193,7 +225,7 @@ class TermWatcher:
         first, last = _char_rect(line, a), _char_rect(line, b - 1)
         rect = (first[0], first[1], last[0] + last[2] - first[0], first[3])
         point = (last[0] + last[2] // 2, last[1] + last[3] // 2)
-        log.info("terminal selection %r after %r (drag %s)", text, row[p:a], "right" if c2 >= c1 else "left")
+        log.info("terminal selection %r after %r (%s)", text, row[p:a], how)
         return Selection(text, row[p:a], row[b:].rstrip(), "terminal", rect, point)
 
     def _input_start(self, row: str, line, a: int, cursor) -> int | None:
@@ -370,17 +402,38 @@ def _char_rect(line, i: int) -> tuple:
     return tuple(int(v) for v in rect[:4])
 
 
+def _style(line, i: int) -> tuple:
+    """(background, foreground) of character i of a line range."""
+    _, U = _uia()
+    r = _char(line, i)
+    return (r.GetAttributeValue(U.UIA_BackgroundColorAttributeId),
+            r.GetAttributeValue(U.UIA_ForegroundColorAttributeId))
+
+
+def _highlight_run(line, c: int, n: int) -> tuple[int, int] | None:
+    """The run of cells colored like character c, when it is a highlight: its background differs from the
+    cells on both sides. (Plain text has the background of the blanks around it and runs on to a border.)"""
+    if not 0 <= c < n:
+        return None
+    s = _style(line, c)
+    a, b = c, c + 1
+    while a > 0 and _style(line, a - 1) == s:
+        a -= 1
+    while b < n and _style(line, b) == s:
+        b += 1
+    sides = [_style(line, i) for i in (a - 1, b) if 0 <= i < n]
+    if not sides or any(o[0] == s[0] for o in sides):
+        return None
+    return a, b
+
+
 def _highlighted(line, a: int, b: int, n: int) -> tuple[int, int]:
     """Narrow characters a..b-1 (those under the press and release points and between them) to what the TUI
     highlighted. herdr selects up to the cell edge nearest the pointer, so the character under an end point is
     often not selected; it inverts the colors of selected cells, and Windows Terminal reports cell colors via
     UIA. Ends colored like the characters just outside the drag are dropped (2026-10-03)."""
-    _, U = _uia()
-
     def style(i):
-        r = _char(line, i)
-        return (r.GetAttributeValue(U.UIA_BackgroundColorAttributeId),
-                r.GetAttributeValue(U.UIA_ForegroundColorAttributeId))
+        return _style(line, i)
     try:
         styles = [style(i) for i in range(a, b)]
         if len(set(styles)) < 2:

@@ -109,7 +109,10 @@ press and release points to characters and the text between them is read from th
 character under an end point is often not selected: the ends are narrowed to the cells herdr highlighted (inverted
 colors, read as UIA cell attributes; 2026-10-03). Codex keeps a drag as its own selection, and a left-to-right drag
 leaves the cursor right after it, so a Backspace there would delete the whole selection and the next one a
-character more: when the cursor already sits there, one Left key clears it first. Used only on one line
+character more: when the cursor already sits there, one Left key clears it first. A double or triple click
+(2026-10-03) is a selection too: the run of highlighted cells around the click (background unlike the cells on both
+sides). Claude Code / agy select a line up to punctuation or a space on a double click; Codex a word (one CJK
+character) on a double click and the whole line on a triple click. Used only on one line
 (the user's choice) of the input box: a row starting with ❯ / › / > at the pane's left edge plus the rows below it
 indented under the prompt, and the terminal cursor must be in that box (a past prompt in the transcript and status
 lines are rejected). Keyboard only since 2026-10-02 (clicks misplaced Codex's cursor, agy ignores them):
