@@ -1,13 +1,12 @@
 """Global push-to-talk hotkey via pynput.
 
-On Windows the hotkey is suppressed with a low-level hook so holding CapsLock
+The hotkey is suppressed with a low-level hook so holding CapsLock
 does not toggle caps state. Whether a short tap (< TAP_THRESHOLD) is replayed as a normal key press is up to the
 app (tap()): a tap on selected text is VoiceInput's own gesture, anywhere else CapsLock still works as CapsLock.
 
 A double tap is a second press within DOUBLE_TAP_GAP of a tap's release; on_press / on_release get double=True
 for that second press.
 """
-import sys
 import time
 
 from pynput import keyboard
@@ -22,7 +21,7 @@ HOTKEYS = {
     "f12": ("F12", keyboard.Key.f12),
 }
 
-# Windows virtual-key codes for the hook-level filter
+# Virtual-key codes for the hook-level filter
 _WIN_VK = {"caps_lock": 0x14, "alt_r": 0xA5, "ctrl_r": 0xA3, "f12": 0x7B}
 _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
 _LLKHF_INJECTED = 0x10
@@ -34,7 +33,7 @@ class PushToTalk:
     def __init__(self, key_name: str, on_press, on_release, on_other_key=None):
         self.on_press = on_press
         self.on_release = on_release
-        self.on_other_key = on_other_key   # on_other_key(vk): any other key the user pressed (Windows only)
+        self.on_other_key = on_other_key   # on_other_key(vk): any other key the user pressed
         self._key_name = key_name
         self._down_at = None
         self._tap_up_at = None      # release time of the last short tap (double-tap detection)
@@ -48,12 +47,7 @@ class PushToTalk:
         self._down_at = None
 
     def start(self) -> None:
-        kwargs = {}
-        if sys.platform == "win32":
-            kwargs["win32_event_filter"] = self._win32_filter
-            self._listener = keyboard.Listener(**kwargs)
-        else:
-            self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
+        self._listener = keyboard.Listener(win32_event_filter=self._win32_filter)
         self._listener.daemon = True
         self._listener.start()
 
@@ -61,7 +55,7 @@ class PushToTalk:
         if self._listener:
             self._listener.stop()
 
-    # --- Windows: handle everything inside the hook so we can suppress the key ---
+    # Everything is handled inside the hook so the key can be suppressed
     def _win32_filter(self, msg, data):
         if data.flags & _LLKHF_INJECTED:
             return True
@@ -74,18 +68,6 @@ class PushToTalk:
         else:
             self._handle_up()
         self._listener.suppress_event()
-
-    # --- macOS / others ---
-    def _matches(self, key) -> bool:
-        return key == HOTKEYS[self._key_name][1]
-
-    def _on_press(self, key):
-        if self._matches(key):
-            self._handle_down()
-
-    def _on_release(self, key):
-        if self._matches(key):
-            self._handle_up()
 
     def _handle_down(self):
         if self._down_at is not None:  # auto-repeat
@@ -106,8 +88,6 @@ class PushToTalk:
 
     def tap(self):
         """Replay one press of the hotkey to the focused app (injected, so the hook lets it through)."""
-        if sys.platform != "win32":
-            return
         key = HOTKEYS[self._key_name][1]
         self._controller.press(key)
         self._controller.release(key)

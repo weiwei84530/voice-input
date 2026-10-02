@@ -17,7 +17,6 @@ import ctypes.wintypes as wt
 import logging
 import queue
 import re
-import sys
 import threading
 import time
 from collections import Counter
@@ -70,8 +69,6 @@ def _uia():
 
 def read_selection() -> Selection | None:
     """The focused app's non-empty selection, or None (nothing selected, unsupported app, terminal)."""
-    if sys.platform != "win32":
-        return None
     try:
         uia, U = _uia()
         el = uia.GetFocusedElement()
@@ -395,8 +392,6 @@ def terms_in(text: str) -> list[str]:
 def caret_rect() -> tuple | None:
     """The focused window's text caret (x, y, w, h) in physical screen pixels, from the Win32 caret (Notepad,
     classic edit boxes). Chrome and terminals draw their own caret and give None."""
-    if sys.platform != "win32":
-        return None
 
     class GUITHREADINFO(ctypes.Structure):
         _fields_ = [("cbSize", wt.DWORD), ("flags", wt.DWORD), ("hwndActive", wt.HWND), ("hwndFocus", wt.HWND),
@@ -422,8 +417,6 @@ class Context:
 def read_context() -> Context:
     """The focused app's selection (see read_selection) and the English terms visible in it."""
     ctx = Context()
-    if sys.platform != "win32":
-        return ctx
     ctx.selection = read_selection()
     ctx.terms = terms_in(visible_text())
     return ctx
@@ -431,8 +424,6 @@ def read_context() -> Context:
 
 def visible_text() -> str:
     """The text visible in the focused control (UI Automation TextPattern), "" if it has none."""
-    if sys.platform != "win32":
-        return ""
     try:
         uia, U = _uia()
         pattern = uia.GetFocusedElement().GetCurrentPattern(U.UIA_TextPatternId)

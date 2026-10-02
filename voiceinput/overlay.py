@@ -1,6 +1,5 @@
 """Minimal always-on-top pill shown while recording / transcribing (Typeless-style)."""
 import math
-import sys
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
@@ -12,8 +11,6 @@ BARS = 9
 
 
 def _click_through(widget):
-    if sys.platform != "win32":
-        return
     import ctypes
     hwnd = int(widget.winId())
     GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT, WS_EX_TOPMOST = -20, 0x08000000, 0x20, 0x8

@@ -1,28 +1,20 @@
 # VoiceInput
 
-Offline push-to-talk voice input. Hold **CapsLock**, speak, release — text is pasted into the focused app.
+Offline push-to-talk voice input for Windows (macOS is not supported; see [docs/macos-port.md](docs/macos-port.md)). Hold **CapsLock**, speak, release — text is pasted into the focused app.
 Single process: one tray icon, settings window, floating indicator. Speech recognition via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
 ## Install / run
 
-| | Windows | macOS |
-|---|---|---|
-| Install | `install.bat` | `bash install.command` |
-| Run | `start.bat` | `./start.command` |
+Install with `install.bat`, run with `start.bat`.
 
 The installer puts uv, Python and the venv inside this folder. Nothing is installed system-wide.
 If you move the folder, run the installer again (the venv records absolute paths).
 
 User data lives outside the app folder, so it survives moving or reinstalling the app:
 
-| | Windows | macOS |
-|---|---|---|
-| Settings, logs | `%LOCALAPPDATA%\VoiceInput` | `~/Library/Application Support/VoiceInput` |
-| Models | `%LOCALAPPDATA%\VoiceInput\models` | `…/VoiceInput/models` |
+`%LOCALAPPDATA%\VoiceInput` holds settings, hotwords, logs and `models\`.
 
 Data from the old layout (`config.json`, `models/` inside the app folder) is moved there automatically on first launch.
-
-macOS: on first launch, grant **Microphone**, **Accessibility** and **Input Monitoring** in System Settings → Privacy & Security.
 
 ## Usage
 
@@ -76,7 +68,7 @@ ASR (biased toward learned hotwords and English terms on screen) → formatting 
 ```
 voiceinput/
   app.py       tray, wiring, push-to-talk flow
-  hotkey.py    global hotkey, double tap (pynput; Windows low-level hook suppresses CapsLock)
+  hotkey.py    global hotkey, double tap (pynput; a low-level hook suppresses CapsLock)
   audio.py     microphone capture
   asr.py       sherpa-onnx recognizers, hotword biasing
   textfmt.py   final text formatting (incl. repeated-word removal)

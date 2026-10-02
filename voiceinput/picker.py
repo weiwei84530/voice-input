@@ -3,7 +3,6 @@
 Two uses: a list of choices (選字 candidates, a suspected mishearing, a context hotword question) and a yes/no box
 asking whether to add a hotword. Both are answered with the mouse only (decided 2026-09-29: short spoken answers
 like 對 / 第二個 were often misheard). A thin bar on the bottom edge shrinks as the timeout runs out."""
-import sys
 import time
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
@@ -229,8 +228,6 @@ class Picker(QWidget):
         self.move(x, y)
 
     def _no_activate(self):
-        if sys.platform != "win32":
-            return
         import ctypes
         hwnd = int(self.winId())
         GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOPMOST = -20, 0x08000000, 0x8

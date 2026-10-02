@@ -12,7 +12,6 @@ by hand, found by comparing it with the text box a few seconds after the user st
 """
 import difflib
 import re
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -26,8 +25,6 @@ _WORD = re.compile(r"[A-Za-z0-9]+(?:['.][A-Za-z0-9]+)*|[^\sA-Za-z0-9，。、！
 
 
 def foreground() -> int:
-    if sys.platform != "win32":
-        return 0
     import ctypes
     return ctypes.windll.user32.GetForegroundWindow()
 

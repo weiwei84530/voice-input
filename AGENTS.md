@@ -21,6 +21,11 @@
 
   Then check the tail of `%LOCALAPPDATA%\VoiceInput\voiceinput.log` for "就緒" / errors.
 
+## Platform
+
+Windows only (decided 2026-10-03, after the macOS paths failed on the user's Mac: no hotkey worked). The partial
+macOS code was removed; don't add `sys.platform` branches back. What a port would need: `docs/macos-port.md`.
+
 ## File layout
 
 Decided 2026-09-26 (the user plans to share the app with other users): code and runtime tools (`.tools/`, `.venv/`)

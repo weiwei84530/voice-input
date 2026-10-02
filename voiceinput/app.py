@@ -174,8 +174,6 @@ class App(QObject):
 
     @staticmethod
     def _dark_taskbar() -> bool:
-        if sys.platform != "win32":
-            return False
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -193,8 +191,6 @@ class App(QObject):
     def _watch_mouse(self):
         """Any click may move the caret, which ends what session.py knows about the text before it. Left button
         drags may select text in a terminal (selection.TermWatcher). Our own clicks (injected) are skipped."""
-        if sys.platform != "win32":
-            return None
         from pynput import mouse
         downs = {0x201, 0x204, 0x207, 0x20B}   # left / right / middle / x button down
 
