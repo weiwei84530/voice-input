@@ -114,7 +114,9 @@ character more: when the cursor already sits there, one Left key clears it first
 sides). Claude Code / agy select a line up to punctuation or a space on a double click; Codex a word (one CJK
 character) on a double click and the whole line on a triple click. Used only on one line
 (the user's choice) of the input box: a row starting with ❯ / › / > at the pane's left edge plus the rows below it
-indented under the prompt, and the terminal cursor must be in that box (a past prompt in the transcript and status
+indented under the prompt (blank rows from Shift+Enter included since 2026-10-04, except between the cursor
+and a selection below it: that is how Codex's status line sits under its box), and the terminal cursor must be in
+that box (a past prompt in the transcript and status
 lines are rejected). Keyboard only since 2026-10-02 (clicks misplaced Codex's cursor, agy ignores them):
 WT reports its cursor as an empty UIA selection, so arrow keys move it (Up/Down to the row, then Left/Right),
 re-reading it after each burst, until it sits right after the selection; then Backspace 20ms apart (a burst lost

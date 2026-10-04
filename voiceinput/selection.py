@@ -231,8 +231,9 @@ class TermWatcher:
     def _input_start(self, row: str, line, a: int, cursor) -> int | None:
         """Where the text of the input box starts on this row (after the prompt or the continuation indent), or
         None when the row is outside the input box. The box is a prompt row at the pane's left edge and the
-        non-empty rows below it that are blank under the prompt; the terminal cursor must be in it (a past prompt
-        in the transcript also starts with the prompt, but the cursor is not there)."""
+        rows below it that are blank under the prompt; the terminal cursor must be in it (a past prompt in the
+        transcript also starts with the prompt, but the cursor is not there), and a blank row may not separate a
+        selection below the cursor from it."""
         if cursor is None:
             return None
         left = max(row.rfind("│", 0, a), row.rfind("┃", 0, a)) + 1   # herdr's sidebar or a pane on the left
@@ -243,13 +244,15 @@ class TermWatcher:
             return None
         col = self._PROMPT.match(rows[i], left).start(1)
 
-        def inside(r):
-            return r[left:col + 2].strip() == "" and r[left:right].strip() != ""
+        def inside(r):         # blank rows too: Shift+Enter leaves empty lines in the box (2026-10-04)
+            return r[left:col + 2].strip() == ""
         if i and (rows[0][left:col + 2].strip() or not all(inside(r) for r in rows[1:i])):
             return None
         dr = _rows_between(line, cursor[0])
         if dr is None or dr < -i or (dr > 0 and not all(inside(r) for r in _lines(line, 1, dr))):
             return None
+        if dr < 0 and any(not r[left:right].strip() for r in rows[1:-dr]):
+            return None        # below a blank row under the cursor: Codex's status line, not the box
         return col + 2 if a >= col + 2 else None
 
 
