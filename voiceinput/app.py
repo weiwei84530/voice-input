@@ -9,8 +9,9 @@ A bare punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol).
 
 The hotkey on selected text (2026-09-30, replacing the spoken 刪除 / 選字): one tap opens the candidate menu, a
 double tap deletes the selection, a double tap held deletes it and dictates in its place. Without a selection a
-double tap undoes the last change and holding the second press records it again (a re-dictation, which opens the
-candidate menu for a changed word that sounds alike). CapsLock taps on a selection do not toggle caps.
+double tap deletes the last dictation while it is still the last change (only that one; no other undo since
+2026-10-04) and holding the second press records it again (a re-dictation, which opens the candidate menu for a
+changed word that sounds alike). CapsLock taps on a selection do not toggle caps.
 Menus are answered with the mouse only (decided 2026-09-29); picked words come first in later menus (picks.py).
 A pick that looks like a correction is offered as a hotword (✓ box), as is a word the user fixed by hand.
 
@@ -336,7 +337,7 @@ class App(QObject):
         self.candidates_ready.emit(sel, words)
 
     def _double_job(self, press: _Press):
-        """Second press of a double tap: delete the selected text, or undo the last change if nothing was
+        """Second press of a double tap: delete the selected text, or the last dictation if nothing was
         selected. A transcription of a held second press waits for this (press.resolved)."""
         try:
             sel = press.first.probe.result().selection
@@ -349,7 +350,7 @@ class App(QObject):
     def _double_action(self, press: _Press, sel):
         try:
             if sel is None:
-                self.undo()
+                self.delete_last()
                 return
             self._close_menu()
             log.info("double tap: delete %r on %s", sel.text, sel.app)
@@ -473,22 +474,22 @@ class App(QObject):
             self.picker.show_list(f"可能聽錯「{sus.word}」", sus.options, caret_rect())
         s.ignore_rects = [self.picker.physical_rect()]
 
-    # --- undo (double tap) ---
-    def undo(self):
-        """Main thread: rewrite the text before the caret back to before the last change (a dictation, a
-        replaced selection, a picked suggestion)."""
-        if self._menu and self._menu[0] in ("learn", "fix"):
-            self._close_menu()        # the change it was offered for is being undone
+    # --- double tap without a selection ---
+    def delete_last(self):
+        """Main thread: delete the last dictation while it is still the last change before the caret. Nothing
+        else is undone (a replaced selection, a picked suggestion, earlier dictations); then the taps are plain."""
         s = self.session
-        step = s.pop_undo()
+        step = s.deletable()
         if step is None:
-            self._notify("沒有可以撤銷的（游標移動過，或還沒有輸入）")
+            log.info("double tap: nothing to delete")
             return
+        if self._menu and self._menu[0] in ("learn", "fix"):
+            self._close_menu()        # the change it was offered for is being deleted
         n, tail = s.plan_to(step.before)
-        log.info("undo %s: %d backspaces + %r", step.note, n, tail)
+        log.info("double tap: delete %s: %d backspaces + %r", step.note, n, tail)
         backspace(n)
         paste_text(tail)
-        s.undone(step)
+        s.deleted_last(step)
 
     def _rewrite(self, a: int, b: int, new: str, note: str, learn=None) -> bool:
         """Main thread: replace buffer[a:b] with new by Backspace + paste."""

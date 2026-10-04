@@ -1,4 +1,4 @@
-r"""Headless end-to-end test: the real App (models, selection edits, hotwords, menus, undo) with a simulated text box in
+r"""Headless end-to-end test: the real App (models, selection edits, hotwords, menus, double tap) with a simulated text box in
 place of the focused app, so nothing is typed into real windows. Audio comes from TTS wav files.
 
   .venv\Scripts\python.exe dev\headless.py <dir> step,step,...

@@ -19,7 +19,7 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
 ## Usage
 
 - Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
-- Double-tap the hotkey to undo what you just dictated; hold the second press to say it again.
+- Double-tap the hotkey to delete what you just dictated (the last sentence only, before the caret moves); hold the second press to say it again.
 - Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark.
 - Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login,
   how long menus stay open, hotwords) and a per-utterance log for this session. Changes apply immediately.
@@ -36,7 +36,7 @@ Select text with the mouse, then:
 | hold and speak | replaces the selection |
 | double tap, hold the second press and speak | deletes the selection, then types what you say |
 
-When what you say sounds like what it replaced (城市 → 程式), or you undo a sentence and say it again with a word
+When what you say sounds like what it replaced (城市 → 程式), or you delete a sentence and say it again with a word
 changed, the new text is typed and a menu of same-sounding words opens for it. Words you picked before come first.
 
 After a dictation a small menu may offer a likely misheard word (a second model heard it differently), or ask whether
@@ -72,7 +72,7 @@ voiceinput/
   audio.py     microphone capture
   asr.py       sherpa-onnx recognizers, hotword biasing
   textfmt.py   final text formatting (incl. repeated-word removal)
-  session.py   what was just typed at the caret, undo, learning from re-dictation and hand edits
+  session.py   what was just typed at the caret, deleting the last dictation, learning from re-dictation and hand edits
   edit.py      replacing a selection, punctuation names, "sounds alike" test
   suspects.py  second-opinion check for misheard words
   selection.py selection / on-screen terms via UI Automation

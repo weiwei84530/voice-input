@@ -2,11 +2,12 @@
 
 Every dictation is pasted at the caret. As long as the user has not pressed a key or clicked since, and the same
 window is in front, the text before the caret ends with exactly what we pasted (the "buffer"). Changes to it (a
-picked suggestion, undo) are done by pressing Backspace up to the edit point and pasting the new tail. This works
+picked suggestion, deleting the last dictation) are done by pressing Backspace up to the edit point and pasting the new tail. This works
 in any app, terminals included (Claude Code), because it needs neither UI Automation nor a selection. Any key
 press or mouse click from the user ends the buffer: the caret may have moved.
 
-Undo (double tap of the hotkey) keeps the buffer before each change and rewrites the tail back to it.
+A double tap of the hotkey deletes the last dictation, only while it is the last change (not after a replaced
+selection or a picked suggestion) and only that one (decided 2026-10-04: no multi-step undo).
 Corrections are learned two ways: a dictation deleted and said again (redictation_pair), and a dictation edited
 by hand, found by comparing it with the text box a few seconds after the user stops typing (typed_fix).
 """
@@ -37,7 +38,7 @@ class Utterance:
     audio: object           # numpy audio, for the second-opinion model
     at: float = field(default_factory=time.monotonic)
     second: str | None = None   # second model's formatted text, filled in the background
-    deleted: bool = False       # removed by Backspace/Delete or undo, without typing anything else
+    deleted: bool = False       # removed by Backspace/Delete or a double tap, without typing anything else
     typed: bool = False         # the user typed other keys after it
     fix_offered: bool = False   # a hand-made correction of it was already offered as a hotword
 
@@ -46,7 +47,7 @@ class Utterance:
 class Step:
     before: str
     after: str
-    spans: list             # utterance spans before the change, to restore on undo
+    spans: list             # utterance spans before the change, to restore when it is deleted
     note: str
 
 
@@ -57,7 +58,7 @@ class Session:
         self.hwnd = 0
         self.dirty = True
         self.utterances: list[Utterance] = []
-        self.steps: list[Step] = []
+        self.step: Step | None = None          # the last dictation, while it can still be deleted
         self.last: Utterance | None = None     # most recent dictation, kept after the buffer ends (re-dictation)
         self.ignore_rects: list = []           # our own windows (menu): clicks there do not move the caret
 
@@ -94,14 +95,14 @@ class Session:
         """Record a paste of text at the caret."""
         with self._lock:
             if self.dirty or hwnd != self.hwnd:
-                self.buffer, self.utterances, self.steps = "", [], []
+                self.buffer, self.utterances = "", []
             before = self.buffer
             spans = self._spans()
             start = len(self.buffer)
             self.buffer += text
             u = Utterance(start, len(self.buffer), text, audio)
             self.utterances.append(u)
-            self.steps.append(Step(before, self.buffer, spans, f"輸入「{text}」"))
+            self.step = Step(before, self.buffer, spans, f"輸入「{text}」")
             self.last = u
             self.hwnd, self.dirty = hwnd, False
             return u
@@ -113,7 +114,7 @@ class Session:
             if self.last is not None:
                 self.last.fix_offered = True
             self.buffer, self.utterances = before + new, []
-            self.steps = [Step(before + old, self.buffer, [], note)]
+            self.step = None
             self.hwnd, self.dirty = hwnd, False
 
     def plan_replace(self, a: int, b: int, new: str) -> tuple[int, str]:
@@ -130,7 +131,7 @@ class Session:
 
     def apply_replace(self, a: int, b: int, new: str, note: str):
         with self._lock:
-            before, spans = self.buffer, self._spans()
+            before = self.buffer
             self.buffer = before[:a] + new + before[b:]
             delta = len(new) - (b - a)
             keep = []
@@ -146,24 +147,25 @@ class Session:
                     u.text = self.buffer[u.start:u.end]
                     keep.append(u)
             self.utterances = keep
-            self.steps.append(Step(before, self.buffer, spans, note))
+            self.step = None
             self.dirty = False
 
-    def pop_undo(self) -> Step | None:
+    def deletable(self) -> Step | None:
+        """The last dictation if it is still the last change right before the caret."""
         with self._lock:
-            if not self.clean() or not self.steps or self.steps[-1].after != self.buffer:
+            if not self.clean() or self.step is None or self.step.after != self.buffer:
                 return None
-            return self.steps[-1]
+            return self.step
 
-    def undone(self, step: Step):
+    def deleted_last(self, step: Step):
         with self._lock:
-            self.steps.pop()
+            self.step = None
             self.buffer = step.before
             for u, (s, e, text) in step.spans:
                 u.start, u.end, u.text, u.deleted = s, e, text, False
             self.utterances = [u for u, _ in step.spans]
             if self.last is not None and self.last not in self.utterances:
-                self.last.deleted = True      # undoing a dictation counts as deleting it (re-dictation)
+                self.last.deleted = True      # counts as deleting it by hand (re-dictation)
             self.dirty = False
 
     def _spans(self):
