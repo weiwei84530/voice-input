@@ -8,7 +8,7 @@ A double tap is a second press within DOUBLE_TAP_GAP of a tap's release; on_pres
 for that second press.
 
 The upper side button of a mouse (XButton2, "forward") can be the hotkey too: a mouse hook suppresses it the same
-way, and a plain tap is replayed as a click of it.
+way, and it is never replayed: its "forward" action is replaced entirely (the user's choice, 2026-10-06).
 """
 import time
 
@@ -53,7 +53,6 @@ class PushToTalk:
         self._listener = None
         self._mouse_listener = None
         self._controller = keyboard.Controller()
-        self._mouse_controller = mouse.Controller()
         self._replaying = False
 
     def set_key(self, key_name: str) -> None:
@@ -118,7 +117,6 @@ class PushToTalk:
         """Replay one press of the hotkey to the focused app (injected, so the hook lets it through)."""
         key = HOTKEYS[self._key_name][1]
         if isinstance(key, mouse.Button):
-            self._mouse_controller.click(key)
-            return
+            return   # the side button's "forward" is replaced entirely
         self._controller.press(key)
         self._controller.release(key)

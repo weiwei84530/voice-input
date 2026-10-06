@@ -81,7 +81,7 @@ CJK/ASCII spacing → trailing punctuation.
 ## Settings (2026-09-29)
 
 Only microphone, hotkey (CapsLock / right Alt / right Ctrl / F12 / the mouse's upper side button XButton2, added
-2026-10-06: suppressed by a mouse hook, a plain tap replayed as a click), strip trailing punctuation, autostart, "candidate menu for sounding-alike changes" (on by
+2026-10-06: suppressed by a mouse hook and never replayed: its "forward" is replaced entirely), strip trailing punctuation, autostart, "candidate menu for sounding-alike changes" (on by
 default; off → the ✓ box is offered directly, as before 2026-09-30), menu timeout (one value for every menu and the ✓
 box, default 10s, added 2026-09-30), "menus also list other tones and fuzzy readings" (on by default, added
 2026-10-03; off → `candidates.homophones` lists only the same reading with tones) and the hotwords page (cards in two columns). The

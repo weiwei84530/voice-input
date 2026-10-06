@@ -314,7 +314,7 @@ class App(QObject):
         caps = self.cfg.hotkey == "caps_lock"
         if sel is None:
             if not caps:
-                self.ptt.tap()   # a plain tap of F12 / right Alt / the side button goes to the app
+                self.ptt.tap()   # a plain tap of F12 / right Alt goes to the app
             return
         if caps:
             self.ptt.tap()       # a tap on a selection is ours: undo the CapsLock toggle
