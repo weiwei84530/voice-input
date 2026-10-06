@@ -34,7 +34,7 @@ from . import autostart, candidates, edit, models, paths, suspects
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
-from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, PushToTalk
+from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, PushToTalk, is_mouse_hotkey
 from .hotwords import HotwordStore, context_words, worth_learning
 from .output import backspace, paste_text, press_delete
 from .overlay import Overlay
@@ -199,6 +199,8 @@ class App(QObject):
         def on_event(msg, data):
             if data.flags & 1:   # LLMHF_INJECTED
                 return False
+            if is_mouse_hotkey(self.cfg.hotkey, msg, data.mouseData):
+                return False   # the hotkey on a mouse button is not a click
             if msg in downs:
                 self.session.on_click(data.pt.x, data.pt.y)
                 if msg == 0x201:
@@ -312,7 +314,7 @@ class App(QObject):
         caps = self.cfg.hotkey == "caps_lock"
         if sel is None:
             if not caps:
-                self.ptt.tap()   # a plain tap of F12 / right Alt goes to the app
+                self.ptt.tap()   # a plain tap of F12 / right Alt / the side button goes to the app
             return
         if caps:
             self.ptt.tap()       # a tap on a selection is ours: undo the CapsLock toggle
