@@ -7,8 +7,9 @@ app (tap()): a tap on selected text is VoiceInput's own gesture, anywhere else C
 A double tap is a second press within DOUBLE_TAP_GAP of a tap's release; on_press / on_release get double=True
 for that second press.
 
-The upper side button of a mouse (XButton2, "forward") can be the hotkey too: a mouse hook suppresses it the same
-way, and it is never replayed: its "forward" action is replaced entirely (the user's choice, 2026-10-06).
+A mouse side button (upper XButton2 "forward", lower XButton1 "back") can be the hotkey too: a mouse hook suppresses
+it the same way, and it is never replayed: its forward / back action is replaced entirely (the user's choice,
+2026-10-06).
 """
 import time
 
@@ -23,6 +24,7 @@ HOTKEYS = {
     "ctrl_r": ("右 Ctrl", keyboard.Key.ctrl_r),
     "f12": ("F12", keyboard.Key.f12),
     "mouse_x2": ("滑鼠側鍵（上）", mouse.Button.x2),
+    "mouse_x1": ("滑鼠側鍵（下）", mouse.Button.x1),
 }
 
 # Virtual-key codes for the hook-level filter
@@ -30,7 +32,7 @@ _WIN_VK = {"caps_lock": 0x14, "alt_r": 0xA5, "ctrl_r": 0xA3, "f12": 0x7B}
 _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
 _LLKHF_INJECTED = 0x10
 _WM_XBUTTONDOWN, _WM_XBUTTONUP = 0x20B, 0x20C
-_XBUTTON = {"mouse_x2": 2}   # high word of MSLLHOOKSTRUCT.mouseData
+_XBUTTON = {"mouse_x1": 1, "mouse_x2": 2}   # high word of MSLLHOOKSTRUCT.mouseData
 _LLMHF_INJECTED = 1
 
 
@@ -117,6 +119,6 @@ class PushToTalk:
         """Replay one press of the hotkey to the focused app (injected, so the hook lets it through)."""
         key = HOTKEYS[self._key_name][1]
         if isinstance(key, mouse.Button):
-            return   # the side button's "forward" is replaced entirely
+            return   # the side button's forward / back is replaced entirely
         self._controller.press(key)
         self._controller.release(key)
