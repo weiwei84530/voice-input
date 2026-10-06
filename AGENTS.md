@@ -84,7 +84,9 @@ Only microphone, hotkey (CapsLock / right Alt / right Ctrl / F12 / the mouse's u
 XButton1, added 2026-10-06: suppressed by a mouse hook and never replayed: its forward / back is replaced entirely), strip trailing punctuation, autostart, "candidate menu for sounding-alike changes" (on by
 default; off → the ✓ box is offered directly, as before 2026-09-30), menu timeout (one value for every menu and the ✓
 box, default 10s, added 2026-09-30), "menus also list other tones and fuzzy readings" (on by default, added
-2026-10-03; off → `candidates.homophones` lists only the same reading with tones) and the hotwords page (cards in two columns). The
+2026-10-03; off → `candidates.homophones` lists only the same reading with tones) "mute the speakers while recording" (off by default, added 2026-10-06, `mute.py`: Core Audio via
+comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing;
+a mute the user set is left alone) and the hotwords page (cards in two columns). The
 刪除 / 選字 trigger-word lists were removed 2026-09-30 with the spoken triggers. Selection edits, the second
 opinion and on-screen terms are always on.
 

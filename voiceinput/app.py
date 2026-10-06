@@ -36,6 +36,7 @@ from .audio import Recorder
 from .config import Config
 from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, PushToTalk, is_mouse_hotkey
 from .hotwords import HotwordStore, context_words, worth_learning
+from .mute import Muter
 from .output import backspace, paste_text, press_delete
 from .overlay import Overlay
 from .picker import Picker
@@ -123,6 +124,7 @@ class App(QObject):
         self._records = deque(maxlen=100)       # transcript log, kept for this session only
         self.hotwords = HotwordStore()
         self.session = Session()
+        self.muter = Muter()
         self._recent = deque(maxlen=10)         # recent dictations (for 選字 second opinions)
         self.picks = PickHistory()
         self._press: _Press | None = None
@@ -273,6 +275,14 @@ class App(QObject):
         if self.recording and self._press is press:
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
+            if self.cfg.mute_while_recording:
+                self.muter.mute()
+
+    def _input_done(self):
+        """Main thread: a recording ended in nothing, or its text was pasted. Unmute, unless another recording
+        has started meanwhile."""
+        if not self.recording:
+            self.muter.restore()
 
     def on_release(self, held: float, double: bool):
         press = self._press
@@ -287,6 +297,7 @@ class App(QObject):
             self.worker.submit(self._transcribe_job, self.recognizer, audio, press, self._hwnd)
         else:
             self.overlay.hide_overlay()
+            self._input_done()
         if press is None:
             return
         caps = self.cfg.hotkey == "caps_lock"
@@ -402,6 +413,7 @@ class App(QObject):
         except Exception:
             log.exception("transcribe failed")
             self.main.emit(self.overlay.hide_overlay)
+            self.main.emit(self._input_done)
 
     # --- dictation ---
     def _dictate(self, text: str, audio, hwnd: int, asks=(), replaced=None, sym=False):
@@ -411,10 +423,12 @@ class App(QObject):
         self.overlay.hide_overlay()
         log.info("result: %s", text)
         if not text:
+            self._input_done()
             return
         s = self.session
         prev = s.redictation_of() if replaced is None and not sym else None
         paste_text(text)
+        self._input_done()
         u = s.dictated(text, audio, foreground() or hwnd)
         if sym:
             return
@@ -586,8 +600,11 @@ class App(QObject):
     def on_edited(self, sel, rep: str, sym: bool):
         self.overlay.hide_overlay()
         if not rep:
+            self._input_done()
             return
-        if not _paste_over(sel, rep):
+        pasted = _paste_over(sel, rep)
+        self._input_done()
+        if not pasted:
             self._notify(_SEL_LOST)
             return
         self.session.replaced_selection(sel.before, sel.text, rep, foreground(), f"{sel.text} → {rep}")
@@ -781,6 +798,7 @@ class App(QObject):
             self.settings.set_status(f"開機啟動設定失敗：{e}")
 
     def quit(self):
+        self.muter.restore()
         self.ptt.stop()
         if self._mouse:
             self._mouse.stop()

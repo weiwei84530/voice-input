@@ -38,6 +38,8 @@ class SettingsDialog(QDialog):
 
         self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
         self.autostart = QCheckBox("開機時自動啟動")
+        self.mute = QCheckBox("錄音時暫時靜音電腦音效")
+        self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.fix_menu = QCheckBox("修改的內容發音相近時，顯示選字選單")
         self.fix_menu.setToolTip("選取後重講、或撤銷後重講成發音相近的字（城市 → 程式）時，跳出同音字選單；"
                                  "關閉時改為直接詢問是否加入熱詞")
@@ -64,6 +66,7 @@ class SettingsDialog(QDialog):
         hotkey_note.setWordWrap(True)
         form.addRow("錄音快捷鍵", self.hotkey)
         form.addRow("", hotkey_note)
+        form.addRow("", self.mute)
         form.addRow("", self.strip_punct)
         form.addRow("", self.autostart)
         form.addRow("", self.fix_menu)
@@ -103,7 +106,7 @@ class SettingsDialog(QDialog):
 
         for combo in (self.mic, self.hotkey):
             combo.currentIndexChanged.connect(self._apply)
-        for box in (self.strip_punct, self.autostart, self.fix_menu, self.loose):
+        for box in (self.strip_punct, self.autostart, self.fix_menu, self.loose, self.mute):
             box.toggled.connect(self._apply)
 
     def load_values(self):
@@ -114,6 +117,7 @@ class SettingsDialog(QDialog):
         self.autostart.setChecked(self.cfg.autostart)
         self.fix_menu.setChecked(self.cfg.fix_menu)
         self.loose.setChecked(self.cfg.loose_homophones)
+        self.mute.setChecked(self.cfg.mute_while_recording)
         self.menu_seconds.setValue(self.cfg.menu_seconds)
         self._loading = False
 
@@ -153,6 +157,7 @@ class SettingsDialog(QDialog):
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.fix_menu = self.fix_menu.isChecked()
         self.cfg.loose_homophones = self.loose.isChecked()
+        self.cfg.mute_while_recording = self.mute.isChecked()
         self.cfg.menu_seconds = self.menu_seconds.value()
         self.cfg.save()
         self.applied.emit()
