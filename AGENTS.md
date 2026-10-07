@@ -197,8 +197,10 @@ removed the same day they were built: the user corrects by selecting with the mo
   window comes to the front. Changes to it are Backspace up to the edit point (one `SendInput` burst) + paste of
   the new tail; works in terminals too.
 - **Double tap of the hotkey (`hotkey.py`)**, nothing selected, deletes the last dictation while it is
-  still the last change and the caret has not moved; only that one (2026-10-04: the user had undo of replaced
-  selections / picked suggestions and repeated undo removed). Otherwise the taps are plain. Holding the second
+  still the last change and the caret has not moved; only that one (2026-10-04: the user had undo of picked
+  suggestions and repeated undo removed). Text spoken over a selection counts as a dictation (2026-10-07, the
+  user's model: like typing over it): a double tap deletes it, the selected text stays gone (a selected 。 turned
+  into ，…。 gets its 。 back). Otherwise the taps are plain. Holding the second
   press records again, so it becomes a re-dictation. CapsLock: the
   two replayed taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
   Recording starts at key-down, but the indicator (overlay, tray icon) only after 0.1s (0.3s = TAP_THRESHOLD, then 0.2s,

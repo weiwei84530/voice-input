@@ -18,11 +18,12 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
 
 ## Usage
 
-- Hold the hotkey (default CapsLock) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
-- Double-tap the hotkey to delete what you just dictated (the last sentence only, before the caret moves); hold the second press to say it again.
-- Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark.
-- Left-click the tray icon to open settings (microphone, hotkey, trailing punctuation removal, launch at login,
-  how long menus stay open, hotwords) and a per-utterance log for this session. Changes apply immediately.
+- Hold the hotkey (default CapsLock; right Alt / right Ctrl / F12 / a mouse side button can be chosen) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
+- Double-tap the hotkey to delete what you just dictated, or just spoke over a selection (the last one only, before
+  the caret moves); hold the second press to say it again.
+- Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark, 換行 for Shift+Enter, 送出 for Enter.
+- Left-click the tray icon to open settings (microphone, hotkey, muting the speakers while recording, the 換行 / 送出
+  commands, selected 。 → ，, launch at login, how long menus stay open, hotwords) and a per-utterance log for this session. Changes apply immediately.
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 
 ## Correcting
@@ -60,8 +61,8 @@ ASR (biased toward learned hotwords and English terms on screen) → formatting 
 - **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), repeated words and restarts removed
   (我們我們, 先打開那個，先打開設定頁), multi-character Chinese numerals → digits (single-character ones like 一個 / 兩個
   stay), 百分之X / X percent → X%, 嗯 / 呃 removed, spelled letters joined (A P I → API), 點 between digits/letters →
-  `.`, half-width punctuation inside English, a space between CJK and English/digits, optional trailing punctuation
-  removal.
+  `.`, half-width punctuation inside English, a space between CJK and English/digits, no sentence-final
+  punctuation when inserting between text on the caret's line.
 
 ## Layout
 

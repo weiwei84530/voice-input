@@ -6,8 +6,9 @@ picked suggestion, deleting the last dictation) are done by pressing Backspace u
 in any app, terminals included (Claude Code), because it needs neither UI Automation nor a selection. Any key
 press or mouse click from the user ends the buffer: the caret may have moved.
 
-A double tap of the hotkey deletes the last dictation, only while it is the last change (not after a replaced
-selection or a picked suggestion) and only that one (decided 2026-10-04: no multi-step undo).
+A double tap of the hotkey deletes the last dictation, only while it is the last change (not after a picked
+suggestion) and only that one (decided 2026-10-04: no multi-step undo). Text spoken over a selection counts as a
+dictation too (2026-10-07): a double tap deletes it, leaving the selected text gone as typing over it would.
 Corrections are learned two ways: a dictation deleted and said again (redictation_pair), and a dictation edited
 by hand, found by comparing it with the text box a few seconds after the user stops typing (typed_fix).
 """
@@ -49,6 +50,7 @@ class Step:
     after: str
     spans: list             # utterance spans before the change, to restore when it is deleted
     note: str
+    dictation: bool = True  # a plain dictation (False: text spoken over a selection)
 
 
 class Session:
@@ -107,14 +109,15 @@ class Session:
             self.hwnd, self.dirty = hwnd, False
             return u
 
-    def replaced_selection(self, before: str, old: str, new: str, hwnd: int, note: str):
+    def replaced_selection(self, before: str, old: str, new: str, hwnd: int, note: str, undo_to: str | None = None):
         """Record an edit of a selection: the caret now follows new, with before (rest of the line) ahead. The
-        last dictation may have changed, so the box is no longer compared with it (typed_fix)."""
+        last dictation may have changed, so the box is no longer compared with it (typed_fix). undo_to: what a
+        double tap turns before + new back into (spoken text), None when it cannot be deleted (a pick)."""
         with self._lock:
             if self.last is not None:
                 self.last.fix_offered = True
             self.buffer, self.utterances = before + new, []
-            self.step = None
+            self.step = Step(undo_to, self.buffer, [], note, False) if undo_to is not None else None
             self.hwnd, self.dirty = hwnd, False
 
     def plan_replace(self, a: int, b: int, new: str) -> tuple[int, str]:
@@ -164,7 +167,7 @@ class Session:
             for u, (s, e, text) in step.spans:
                 u.start, u.end, u.text, u.deleted = s, e, text, False
             self.utterances = [u for u, _ in step.spans]
-            if self.last is not None and self.last not in self.utterances:
+            if step.dictation and self.last is not None and self.last not in self.utterances:
                 self.last.deleted = True      # counts as deleting it by hand (re-dictation)
             self.dirty = False
 

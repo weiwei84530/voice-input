@@ -513,8 +513,9 @@ class App(QObject):
 
     # --- double tap without a selection ---
     def delete_last(self):
-        """Main thread: delete the last dictation while it is still the last change before the caret. Nothing
-        else is undone (a replaced selection, a picked suggestion, earlier dictations); then the taps are plain."""
+        """Main thread: delete the last dictation (or text spoken over a selection) while it is still the last
+        change before the caret. Nothing else is undone (a picked suggestion, earlier dictations); then the taps
+        are plain."""
         s = self.session
         step = s.deletable()
         if step is None:
@@ -633,7 +634,9 @@ class App(QObject):
         if not pasted:
             self._notify(_SEL_LOST)
             return
-        self.session.replaced_selection(sel.before, sel.text, rep, foreground(), f"{sel.text} → {rep}")
+        # a double tap deletes the spoken text; over a 。 turned into ，…。 it puts the 。 back
+        undo_to = sel.before + ("。" if rep.startswith("，") and sel.text.strip() == "。" else "")
+        self.session.replaced_selection(sel.before, sel.text, rep, foreground(), f"{sel.text} → {rep}", undo_to)
         if not sym and edit.similar(sel.text, rep):
             n = len(sel.before)
             self.bg.submit(self._fix_job, _Fix(n, n + len(rep), sel.text, rep, sel.before, sel.after,
