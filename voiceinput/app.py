@@ -37,14 +37,14 @@ from .config import Config
 from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, PushToTalk, is_mouse_hotkey
 from .hotwords import HotwordStore, context_words, worth_learning
 from .mute import Muter
-from .output import backspace, paste_text, press_delete
+from .output import backspace, paste_text, press_chord, press_delete, press_key
 from .overlay import Overlay
 from .picker import Picker
 from .picks import PickHistory
 from .selection import Context, ContextProbe, caret_rect, move_cursor_after, term_watcher, visible_text
 from .session import Session, foreground, redictation_pair, typed_fix
 from .settings import SettingsDialog
-from .textfmt import format_text, to_traditional
+from .textfmt import ends_with_punct, format_text, to_traditional
 
 log = logging.getLogger("voiceinput")
 
@@ -396,7 +396,18 @@ class App(QObject):
             raw = rec.recognize(audio, self._bias(ctx))
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
-            formatted = format_text(raw, self.cfg.strip_trailing_punct)
+            # no sentence-final punctuation when the caret has text on both sides: the user is inserting
+            mid = ctx.caret is not None and all(s.strip() for s in ctx.caret)
+            formatted = format_text(raw, mid)
+            cmd = edit.command(formatted)
+            if cmd and not (self.cfg.newline_command if cmd == "newline" else self.cfg.send_command):
+                cmd = None
+            if cmd:
+                log.info("command: %s", cmd)
+                self.record.emit({"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": "",
+                                  "edit": "命令：" + ("換行（Shift+Enter）" if cmd == "newline" else "送出（Enter）")})
+                self.main.emit(lambda: self._command(cmd))
+                return
             sym = edit.symbol(formatted)
             text, asks = (sym, []) if sym else self.hotwords.apply(formatted)
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
@@ -414,6 +425,16 @@ class App(QObject):
             log.exception("transcribe failed")
             self.main.emit(self.overlay.hide_overlay)
             self.main.emit(self._input_done)
+
+    def _command(self, cmd: str):
+        """Main thread: 換行 / 送出 spoken alone."""
+        self.overlay.hide_overlay()
+        if cmd == "newline":
+            press_chord(0x10, 0x0D)   # Shift+Enter
+        else:
+            press_key(0x0D, 1)        # Enter
+        self.session.on_key(0x0D)     # the caret is no longer right after the last dictation
+        self._input_done()
 
     # --- dictation ---
     def _dictate(self, text: str, audio, hwnd: int, asks=(), replaced=None, sym=False):
@@ -461,7 +482,7 @@ class App(QObject):
         """The second model's formatted transcript of a dictation (cached on it)."""
         if u.second is None and self.second is not None and u.audio is not None:
             t0 = time.monotonic()
-            u.second = format_text(self.second.recognize(u.audio), self.cfg.strip_trailing_punct)
+            u.second = format_text(self.second.recognize(u.audio), not ends_with_punct(u.text))
             log.info("second opinion %.2fs: %s", time.monotonic() - t0, u.second)
         return u.second
 
@@ -591,7 +612,12 @@ class App(QObject):
 
     def _edit_job(self, sel, text: str, sym: bool, entry: dict):
         """Worker thread: an utterance spoken on a selection replaces it."""
-        rep = text if sym else edit.replacement(sel.text, text)
+        if sym:
+            rep = text
+        elif self.cfg.period_to_comma and sel.text.strip() == "。":
+            rep = edit.continue_sentence(text)
+        else:
+            rep = edit.replacement(sel.text, text)
         entry["edit"] = f"{sel.text} → {rep}"
         log.info("edit on %s: %s", sel.app, entry["edit"])
         self.record.emit(entry)

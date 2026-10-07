@@ -72,6 +72,15 @@ def press_key(vk: int, n: int) -> None:
     ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
 
 
+def press_chord(*vks: int) -> None:
+    """Press keys together (Shift+Enter: press_chord(0x10, 0x0D)) in one SendInput call."""
+    events = (_INPUT * (2 * len(vks)))()
+    for i, (vk, up) in enumerate([(vk, 0) for vk in vks] + [(vk, 2) for vk in reversed(vks)]):
+        events[i].type = 1   # INPUT_KEYBOARD
+        events[i].ki = _KEYBDINPUT(vk, 0, up, 0, None)
+    ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
+
+
 def backspace(n: int, gap: float = 0.0) -> None:
     """gap: seconds between presses. Codex in a terminal dropped one of a burst of Backspaces after some
     text (abc_ascii, 2026-10-02); 20ms apart none were lost."""

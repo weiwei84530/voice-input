@@ -7,7 +7,7 @@ Each step is a wav name in <dir>/wav (the hotkey held while it is spoken), sel:W
 box), click (the user clicks: ends what the app knows about the text), tick (click ✓ in the add-hotword box), pick:N
 (click row N of an open menu, 1-based), pickw:WORD (click the row showing WORD), keep (click 保留「X」 in a context
 hotword question), tap (one tap of the hotkey), undo / tap2 (double tap), tap2:WAV (double tap, the second press
-held while WAV is spoken), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting
+held while WAV is spoken), at:WORD (put the caret right after the last WORD; at: puts it at the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting
 in memory only), type:TEXT
 (the user replaces the last dictation's copy of its first differing word by hand: type:城市=程式, then the idle
 check runs at once) or key:BACK (the user presses Backspace n times: key:BACK*3).
@@ -60,12 +60,29 @@ class Box:
         line_end = len(self.text) if line_end < 0 else line_end
         return selection.Selection(self.text[a:b], self.text[line_start:a], self.text[b:line_end], "fake.exe", None)
 
+    def caret_context(self):
+        if self.sel:
+            return None
+        start = self.text.rfind("\n", 0, self.caret) + 1
+        end = self.text.find("\n", self.caret)
+        return self.text[start:self.caret], self.text[self.caret:len(self.text) if end < 0 else end]
+
+    def keys(self, *vks):
+        """Shift+Enter types a newline; Enter sends the text (the box is emptied)."""
+        if vks == (0x10, 0x0D):
+            self.paste("\n")
+        elif vks == (0x0D, 1):
+            print(f"      [送出] {self.text!r}")
+            self.text, self.caret = "", 0
+
 
 box = Box()
 for mod in (appmod, output):
     mod.paste_text = box.paste
 appmod.backspace = box.back
 appmod.press_delete = box.delete
+appmod.press_chord = box.keys
+appmod.press_key = box.keys
 appmod.foreground = session.foreground = lambda: HWND
 appmod.caret_rect = lambda: None
 appmod.visible_text = lambda: box.text
@@ -77,7 +94,7 @@ appmod.App._watch_mouse = lambda self: None       # the user's real clicks must 
 
 class Probe:
     def __init__(self, *_):
-        self._ctx = selection.Context(box.selection(), [])
+        self._ctx = selection.Context(box.selection(), [], box.caret_context())
 
     def result(self, timeout=2.0):
         return self._ctx
@@ -197,6 +214,13 @@ try:
             pump(1.5)
             menu = f"   選單：{A.picker.title.text()} {A.picker.candidates}" if A.picker.isVisible() else ""
             print(f"[說 {step[4:]}（跳過辨識）] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{menu}")
+            continue
+        if step.startswith("at:"):
+            w = step[3:]
+            box.sel = None
+            box.caret = box.text.rfind(w) + len(w) if w else len(box.text)
+            A.session.on_click(0, 0)
+            print(f"[游標移到] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step == "click":
             A.session.on_click(0, 0)

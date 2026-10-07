@@ -231,7 +231,15 @@ def _percent(m):
     return f"{w}%"
 
 
-def format_text(text: str, strip_trailing_punct: bool = True) -> str:
+def strip_trailing(text: str) -> str:
+    return _TRAILING_PUNCT.sub("", text)
+
+
+def ends_with_punct(text: str) -> bool:
+    return bool(_TRAILING_PUNCT.search(text))
+
+
+def format_text(text: str, strip_trailing_punct: bool = False) -> str:
     text = to_traditional(text)
     text = _FILLER.sub("", text)
     text = remove_disfluencies(text)

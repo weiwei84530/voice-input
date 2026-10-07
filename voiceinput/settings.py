@@ -36,7 +36,10 @@ class SettingsDialog(QDialog):
         for key, (label, _) in HOTKEYS.items():
             self.hotkey.addItem(label, key)
 
-        self.strip_punct = QCheckBox("移除句尾標點（。，,.）")
+        self.newline_cmd = QCheckBox("只說「換行」時，按 Shift+Enter 換行")
+        self.send_cmd = QCheckBox("只說「送出」時，按 Enter 送出訊息")
+        self.period_comma = QCheckBox("選取句號後講話，句號改成逗號並接上講的內容")
+        self.period_comma.setToolTip("今天很好。明天見 → 選取「。」講「我們去公園」→ 今天很好，我們去公園。明天見")
         self.autostart = QCheckBox("開機時自動啟動")
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
@@ -67,7 +70,9 @@ class SettingsDialog(QDialog):
         form.addRow("錄音快捷鍵", self.hotkey)
         form.addRow("", hotkey_note)
         form.addRow("", self.mute)
-        form.addRow("", self.strip_punct)
+        form.addRow("", self.newline_cmd)
+        form.addRow("", self.send_cmd)
+        form.addRow("", self.period_comma)
         form.addRow("", self.autostart)
         form.addRow("", self.fix_menu)
         form.addRow("", self.loose)
@@ -106,14 +111,16 @@ class SettingsDialog(QDialog):
 
         for combo in (self.mic, self.hotkey):
             combo.currentIndexChanged.connect(self._apply)
-        for box in (self.strip_punct, self.autostart, self.fix_menu, self.loose, self.mute):
+        for box in (self.newline_cmd, self.send_cmd, self.period_comma, self.autostart, self.fix_menu, self.loose, self.mute):
             box.toggled.connect(self._apply)
 
     def load_values(self):
         self._loading = True
         self._select(self.mic, self.cfg.mic)
         self._select(self.hotkey, self.cfg.hotkey)
-        self.strip_punct.setChecked(self.cfg.strip_trailing_punct)
+        self.newline_cmd.setChecked(self.cfg.newline_command)
+        self.send_cmd.setChecked(self.cfg.send_command)
+        self.period_comma.setChecked(self.cfg.period_to_comma)
         self.autostart.setChecked(self.cfg.autostart)
         self.fix_menu.setChecked(self.cfg.fix_menu)
         self.loose.setChecked(self.cfg.loose_homophones)
@@ -153,7 +160,9 @@ class SettingsDialog(QDialog):
             return
         self.cfg.mic = self.mic.currentData()
         self.cfg.hotkey = self.hotkey.currentData()
-        self.cfg.strip_trailing_punct = self.strip_punct.isChecked()
+        self.cfg.newline_command = self.newline_cmd.isChecked()
+        self.cfg.send_command = self.send_cmd.isChecked()
+        self.cfg.period_to_comma = self.period_comma.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.fix_menu = self.fix_menu.isChecked()
         self.cfg.loose_homophones = self.loose.isChecked()

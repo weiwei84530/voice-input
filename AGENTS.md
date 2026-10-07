@@ -55,6 +55,11 @@ Memory with everything on: ~1.1GB (was ~3GB with the LLM). The word index held a
 removal → disfluencies → 百分之 → numerals → spelled letters → 點 → percent → number+letter → English punctuation →
 CJK/ASCII spacing → trailing punctuation.
 
+- Trailing punctuation (2026-10-07, replacing the "strip trailing punctuation" setting): the model's sentence-final
+  。，,. is kept, except when the caret's line has non-blank text on both sides of it (the user is inserting).
+  `selection.read_caret` reads that at key-down with the selection probe: UIA in normal apps, the input box row the
+  Windows Terminal cursor is on in terminals (same behaviour everywhere, the user's requirement). Unknown → kept.
+
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
 - After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台).
 - 嗯 / 呃 are removed by regex.
@@ -81,7 +86,8 @@ CJK/ASCII spacing → trailing punctuation.
 ## Settings (2026-09-29)
 
 Only microphone, hotkey (CapsLock / right Alt / right Ctrl / F12 / the mouse's upper or lower side button XButton2 /
-XButton1, added 2026-10-06: suppressed by a mouse hook and never replayed: its forward / back is replaced entirely), strip trailing punctuation, autostart, "candidate menu for sounding-alike changes" (on by
+XButton1, added 2026-10-06: suppressed by a mouse hook and never replayed: its forward / back is replaced entirely), the 換行 / 送出 commands and "selected 。 → ，"
+(all three on by default, 2026-10-07), autostart, "candidate menu for sounding-alike changes" (on by
 default; off → the ✓ box is offered directly, as before 2026-09-30), menu timeout (one value for every menu and the ✓
 box, default 10s, added 2026-09-30), "menus also list other tones and fuzzy readings" (on by default, added
 2026-10-03; off → `candidates.homophones` lists only the same reading with tones) "mute the speakers while recording" (off by default, added 2026-10-06, `mute.py`: Core Audio via
@@ -181,7 +187,10 @@ removed the same day they were built: the user corrects by selecting with the mo
 - **Punctuation names** (restored 2026-09-30, `edit.symbol`): an utterance that is exactly 逗號 / 句號 / 句點 / 問號 /
   驚嘆號 / 感嘆號 / 頓號 / 分號 / 冒號 / 點點點 / 刪節號 / 省略號 types the mark, appended after any existing
   punctuation (the user chose not to replace it). Exact text only: 都好 is not 逗號. On a selection it replaces it.
-  This is the only spoken command left.
+  Commands (2026-10-07, each a setting, `edit.command`): an utterance of exactly 換行 presses Shift+Enter, 送出
+  presses Enter; same exact-text rule.
+- **Selected 。** (setting, 2026-10-07): speaking on a selected 。 replaces it with ， + the utterance + 。
+  (今天很好。明天見 → 今天很好，我們去公園。明天見).
 
 - **Dictated-text buffer (`session.py`)**: the text we pasted is known to sit right before the caret until the user
   presses a key (keyboard hook, injected keys ignored), clicks (mouse hook; clicks on our menu ignored) or another

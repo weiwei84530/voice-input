@@ -504,14 +504,54 @@ def caret_rect() -> tuple | None:
 class Context:
     selection: Selection | None = None
     terms: list[str] = field(default_factory=list)
+    caret: tuple[str, str] | None = None   # without a selection: the line's text before and after the caret
 
 
 def read_context() -> Context:
-    """The focused app's selection (see read_selection) and the English terms visible in it."""
+    """The focused app's selection (see read_selection), else the text around its caret, and the English terms
+    visible in it."""
     ctx = Context()
     ctx.selection = read_selection()
+    if ctx.selection is None:
+        ctx.caret = read_caret()
     ctx.terms = terms_in(visible_text())
     return ctx
+
+
+def read_caret() -> tuple[str, str] | None:
+    """The text of the caret's line before and after it, or None when unknown. In a terminal: the input box row
+    the cursor is on, between the prompt (or continuation indent) and a right border."""
+    try:
+        uia, U = _uia()
+        el = uia.GetFocusedElement()
+        pattern = el.GetCurrentPattern(U.UIA_TextPatternId)
+        if not pattern:
+            return None
+        pattern = pattern.QueryInterface(U.IUIAutomationTextPattern)
+        if _proc_name(el.CurrentProcessId) in _TERMINALS or el.CurrentClassName == "TermControl":
+            cursor = _term_cursor(pattern)
+            if cursor is None:
+                return None
+            line, col = cursor
+            row = line.GetText(-1).rstrip("\r\n")
+            p = term_watcher._input_start(row, line, col, cursor)
+            if p is None:
+                return None
+            right = min((i for i in (row.find("│", col), row.find("┃", col)) if i >= 0), default=len(row))
+            return row[p:col], row[col:right]
+        ranges = pattern.GetSelection()
+        if ranges.Length == 0:
+            return None
+        caret = ranges.GetElement(0)
+        line = caret.Clone()
+        line.ExpandToEnclosingUnit(_LINE)
+        before, after = line.Clone(), line.Clone()
+        before.MoveEndpointByRange(_END, caret, _START)
+        after.MoveEndpointByRange(_START, caret, _END)
+        return before.GetText(-1), after.GetText(-1).rstrip("\r\n")
+    except Exception:
+        log.exception("reading the caret failed")
+        return None
 
 
 def visible_text() -> str:
