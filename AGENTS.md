@@ -86,7 +86,8 @@ CJK/ASCII spacing → trailing punctuation.
 ## Settings (2026-09-29)
 
 Only microphone, hotkey (CapsLock / right Alt / right Ctrl / F12 / the mouse's upper or lower side button XButton2 /
-XButton1, added 2026-10-06: suppressed by a mouse hook and never replayed: its forward / back is replaced entirely), the 換行 / 送出 commands and "selected 。 → ，"
+XButton1, added 2026-10-06, or the middle button, 2026-10-08: suppressed by a mouse hook and never replayed: the
+button's own action is replaced entirely), the 換行 / 送出 commands and "selected 。 → ，"
 (all three on by default, 2026-10-07), autostart, "candidate menu for sounding-alike changes" (on by
 default; off → the ✓ box is offered directly, as before 2026-09-30), menu timeout (one value for every menu and the ✓
 box, default 10s, added 2026-09-30), "menus also list other tones and fuzzy readings" (on by default, added

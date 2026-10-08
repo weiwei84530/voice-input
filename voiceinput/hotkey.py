@@ -7,9 +7,9 @@ app (tap()): a tap on selected text is VoiceInput's own gesture, anywhere else C
 A double tap is a second press within DOUBLE_TAP_GAP of a tap's release; on_press / on_release get double=True
 for that second press.
 
-A mouse side button (upper XButton2 "forward", lower XButton1 "back") can be the hotkey too: a mouse hook suppresses
-it the same way, and it is never replayed: its forward / back action is replaced entirely (the user's choice,
-2026-10-06).
+A mouse side button (upper XButton2 "forward", lower XButton1 "back") or the middle button (2026-10-08) can be the
+hotkey too: a mouse hook suppresses it the same way, and it is never replayed: its own action (forward / back, middle
+click, autoscroll) is replaced entirely (the user's choice, 2026-10-06 and 2026-10-08).
 """
 import time
 
@@ -25,20 +25,22 @@ HOTKEYS = {
     "f12": ("F12", keyboard.Key.f12),
     "mouse_x2": ("滑鼠側鍵（上）", mouse.Button.x2),
     "mouse_x1": ("滑鼠側鍵（下）", mouse.Button.x1),
+    "mouse_middle": ("滑鼠中鍵", mouse.Button.middle),
 }
 
 # Virtual-key codes for the hook-level filter
 _WIN_VK = {"caps_lock": 0x14, "alt_r": 0xA5, "ctrl_r": 0xA3, "f12": 0x7B}
 _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
 _LLKHF_INJECTED = 0x10
-_WM_XBUTTONDOWN, _WM_XBUTTONUP = 0x20B, 0x20C
-_XBUTTON = {"mouse_x1": 1, "mouse_x2": 2}   # high word of MSLLHOOKSTRUCT.mouseData
+# (button down message, button up message, XBUTTON number in the high word of MSLLHOOKSTRUCT.mouseData)
+_MOUSE = {"mouse_x1": (0x20B, 0x20C, 1), "mouse_x2": (0x20B, 0x20C, 2), "mouse_middle": (0x207, 0x208, None)}
 _LLMHF_INJECTED = 1
 
 
 def is_mouse_hotkey(key_name: str, msg: int, mouse_data: int) -> bool:
     """A low-level mouse event is a press or release of this mouse hotkey."""
-    return msg in (_WM_XBUTTONDOWN, _WM_XBUTTONUP) and mouse_data >> 16 == _XBUTTON.get(key_name)
+    spec = _MOUSE.get(key_name)
+    return spec is not None and msg in spec[:2] and (spec[2] is None or mouse_data >> 16 == spec[2])
 
 
 class PushToTalk:
@@ -92,7 +94,7 @@ class PushToTalk:
     def _win32_mouse_filter(self, msg, data):
         if data.flags & _LLMHF_INJECTED or not is_mouse_hotkey(self._key_name, msg, data.mouseData):
             return False   # never passed on to pynput's (unused) callbacks
-        if msg == _WM_XBUTTONDOWN:
+        if msg == _MOUSE[self._key_name][0]:
             self._handle_down()
         else:
             self._handle_up()
@@ -119,6 +121,6 @@ class PushToTalk:
         """Replay one press of the hotkey to the focused app (injected, so the hook lets it through)."""
         key = HOTKEYS[self._key_name][1]
         if isinstance(key, mouse.Button):
-            return   # the side button's forward / back is replaced entirely
+            return   # a mouse button's own action is replaced entirely
         self._controller.press(key)
         self._controller.release(key)

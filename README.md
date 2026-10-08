@@ -18,7 +18,7 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
 
 ## Usage
 
-- Hold the hotkey (default CapsLock; right Alt / right Ctrl / F12 / a mouse side button can be chosen) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
+- Hold the hotkey (default CapsLock; right Alt / right Ctrl / F12 / a mouse side or middle button can be chosen) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
 - Double-tap the hotkey to delete what you just dictated, or just spoke over a selection (the last one only, before
   the caret moves); hold the second press to say it again.
 - Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark, 換行 for Shift+Enter, 送出 for Enter.
